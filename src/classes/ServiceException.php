@@ -7,6 +7,7 @@ class ServiceException extends Exception {
 
     /**
      *
+     * @param string $errorCode
      * @param string $additionalMessage
      * @param mixed $previous
      */

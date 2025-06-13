@@ -68,8 +68,12 @@ class APIQuestion {
     private $modified = true;
     private $api;
 
-    public function __construct() {
+    public function __construct($itemCode = null, $value = null, $optionId = null) {
         $this->api = LinkcareSoapAPI::getInstance();
+
+        $this->itemCode = $itemCode;
+        $this->value = $value;
+        $this->optionId = $optionId;
     }
 
     /**

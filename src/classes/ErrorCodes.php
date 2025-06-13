@@ -1,6 +1,9 @@
 <?php
 
 abstract class ErrorCodes extends BasicEnum {
+    /** @var string Functionality not implemented */
+    const NOT_IMPLEMENTED = 'NOT_IMPLEMENTED';
+
     /** @var string Error trying to communicate with API */
     const API_COMM_ERROR = 'COMM_ERROR';
 
@@ -21,6 +24,9 @@ abstract class ErrorCodes extends BasicEnum {
 
     /** @var string An error happened executing a DB command */
     const DB_ERROR = 'DB_ERROR';
+
+    /** @var string An object was not found */
+    const NOT_FOUND = 'NOT_FOUND';
 
     /** @var string Required data does not exist */
     const DATA_MISSING = 'DATA_MISSING';

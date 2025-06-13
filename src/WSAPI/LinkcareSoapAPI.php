@@ -715,6 +715,18 @@ class LinkcareSoapAPI {
     }
 
     /**
+     *
+     * @param APITask $task
+     * @throws APIException
+     */
+    function task_delete($task) {
+        $xml = new XMLHelper('task');
+        $task->toXML($xml, null);
+        $params = ["token" => $this->session->getToken(), "task" => $task->getId()];
+        $this->invoke('task_delete', $params);
+    }
+
+    /**
      * Returns the list of ACTIVITIES of a FORM
      *
      * @param int $taskId
@@ -774,15 +786,17 @@ class LinkcareSoapAPI {
      * Inserts a new TASK in an ADMISSION.
      * The return value is the ID of the new TASK
      *
-     * @param string $caseContactXML
-     * @param int $subscriptionId
-     * @param boolean $allowIncomplete
+     * @param string $admissionId
+     * @param string $taskCode
+     * @param string $date
+     * @param array $parameters
      * @throws APIException
      * @return int
      */
-    function task_insert_by_task_code($admissionId, $taskCode, $date = null) {
+    function task_insert_by_task_code($admissionId, $taskCode, $date = null, $parameters = null) {
         $taskId = null;
-        $params = ["admission" => $admissionId, "task_code" => $taskCode, "date" => $date];
+        $params = ["admission" => $admissionId, "task_code" => $taskCode, "date" => $date,
+                "parameters" => $parameters ? json_encode($parameters) : null];
         $resp = $this->invoke('task_insert_by_task_code', $params);
         if (!$resp->getErrorCode()) {
             $taskId = $resp->getResult();
@@ -989,6 +1003,27 @@ class LinkcareSoapAPI {
     public function form_close($formId) {
         $params = ['form' => $formId];
         $this->invoke('form_close', $params);
+    }
+
+    /**
+     * Inserts a new FORM in an TASK.
+     * The return value is the ID of the new FORM
+     *
+     * @param string $taskId
+     * @param string $formCode
+     * @throws APIException
+     * @return int
+     */
+    function form_insert($taskId, $formCode, $parameters, $newFormCode = null) {
+        $taskId = null;
+        $params = ["task" => $taskId, "form_code" => $formCode, 'new_form_code' => $newFormCode,
+                "parameters" => $parameters ? json_encode($parameters) : null];
+        $resp = $this->invoke('form_insert', $params);
+        if (!$resp->getErrorCode()) {
+            $formId = $resp->getResult();
+        }
+
+        return $formId;
     }
 
     /**

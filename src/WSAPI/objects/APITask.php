@@ -152,7 +152,7 @@ class APITask {
      * @return string
      */
     public function getDateTime() {
-        return trim($this->date . ' ', $this->hour);
+        return trim($this->date . ' ' . $this->hour);
     }
 
     /**
@@ -199,8 +199,8 @@ class APITask {
      *
      * @return APIForm[]
      */
-    public function getForms() {
-        if ($this->forms === null) {
+    public function getForms($forceReload = true) {
+        if ($this->forms === null || $forceReload) {
             $this->forms = $this->api->task_activity_list($this->id);
         }
         return $this->forms;
@@ -399,6 +399,10 @@ class APITask {
         if ($this->modified) {
             $this->api->task_set($this);
         }
+    }
+
+    public function delete() {
+        $this->api->task_delete($this);
     }
 
     /**

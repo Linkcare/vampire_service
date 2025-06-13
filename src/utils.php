@@ -170,3 +170,7 @@ function str_split_multibyte($string, $split_length = 1, $encoding = null) {
     return $result;
 }
 
+function loadParam($parameters, $propertyName) {
+    return $parameters && property_exists($parameters, $propertyName) ? $parameters->$propertyName : null;
+}
+

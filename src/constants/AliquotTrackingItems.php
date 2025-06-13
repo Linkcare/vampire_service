@@ -1,7 +1,6 @@
 <?php
 
 abstract class AliquotTrackingItems extends BasicEnum {
-    const SHIPMENT_REF = 'SHIPMENT_REF';
     const ALIQUOTS_ARRAY = 'ALIQUOTS_ARRAY';
     const ALIQUOT_ID = 'ALIQUOT_ID';
     const ALIQUOT_CREATION_DATE = 'ALIQUOT_CREATION_DATE';
