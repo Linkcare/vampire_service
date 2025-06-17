@@ -11,19 +11,19 @@ class Shipment {
     public $statusId;
 
     /** @var string */
-    public $statusName;
+    public $status;
 
     /** @var number */
     public $sentFromId;
 
     /** @var string */
-    public $sentFromName;
+    public $sentFrom;
 
     /** @var number|null */
     public $sentToId;
 
     /** @var string */
-    public $sentToName;
+    public $sentTo;
 
     /** @var string|null */
     public $sendDate;
@@ -32,7 +32,7 @@ class Shipment {
     public $senderId;
 
     /** @var string|null */
-    public $senderName;
+    public $sender;
 
     /** @var string|null */
     public $receptionDate;
@@ -40,8 +40,14 @@ class Shipment {
     /** @var number|null */
     public $receiverId;
 
+    /** @var number|null */
+    public $receptionStatusId;
+
+    /** @var number */
+    public $receptionStatus;
+
     /** @var string|null */
-    public $receiverName;
+    public $receiver;
 
     /** @var Aliquot[] */
     private $aliquots = null;
@@ -57,17 +63,19 @@ class Shipment {
         $shipment->id = $rst->GetField('ID_SHIPMENT');
         $shipment->ref = $rst->GetField('SHIPMENT_REF');
         $shipment->statusId = $rst->GetField('ID_STATUS');
-        $shipment->statusName = ShipmentStatus::getName($shipment->statusId);
+        $shipment->status = ShipmentStatus::getName($shipment->statusId);
         $shipment->sentFromId = $rst->GetField('ID_SENT_FROM');
-        $shipment->sentFromName = $rst->GetField('SENT_FROM');
+        $shipment->sentFrom = $rst->GetField('SENT_FROM');
         $shipment->sentToId = $rst->GetField('ID_SENT_TO');
-        $shipment->sentToName = $rst->GetField('SENT_TO');
+        $shipment->sentTo = $rst->GetField('SENT_TO');
         $shipment->sendDate = $rst->GetField('SHIPMENT_DATE');
         $shipment->senderId = $rst->GetField('ID_SENDER');
-        $shipment->senderName = $rst->GetField('SENDER');
+        $shipment->sender = $rst->GetField('SENDER');
         $shipment->receptionDate = $rst->GetField('RECEPTION_DATE');
         $shipment->receiverId = $rst->GetField('ID_RECEIVER');
-        $shipment->receiverName = $rst->GetField('RECEIVER');
+        $shipment->receiver = $rst->GetField('RECEIVER');
+        $shipment->receptionStatusId = $rst->GetField('ID_RECEPTION_STATUS');
+        $shipment->receptionStatus = ReceptionStatus::getName($shipment->receptionStatusId);
 
         return $shipment;
     }
@@ -77,17 +85,19 @@ class Shipment {
         $json->id = $this->id;
         $json->ref = $this->ref;
         $json->statusId = $this->statusId;
-        $json->statusName = ShipmentStatus::getName($this->statusId);
+        $json->status = ShipmentStatus::getName($this->statusId);
         $json->sentFromId = $this->sentFromId;
-        $json->sentFromName = $this->sentFromName;
+        $json->sentFrom = $this->sentFrom;
         $json->sentToId = $this->sentToId;
-        $json->sentToName = $this->sentToName;
+        $json->sentTo = $this->sentTo;
         $json->sendDate = DateHelper::UTCToLocal($this->sendDate, $timezone);
         $json->senderId = $this->senderId;
-        $json->senderName = $this->senderName;
+        $json->sender = $this->sender;
         $json->receptionDate = DateHelper::UTCToLocal($this->receptionDate, $timezone);
         $json->receiverId = $this->receiverId;
-        $json->receiverName = $this->receiverName;
+        $json->receiver = $this->receiver;
+        $json->receptionStatusId = $this->receptionStatusId;
+        $json->receptionStatus = ReceptionStatus::getName($this->receptionStatusId);
 
         if (!empty($this->aliquots)) {
             $json->aliquots = [];

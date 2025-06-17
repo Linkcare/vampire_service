@@ -90,7 +90,7 @@ return;
 function track_pending_shipments($parameters) {
     // Find the shipped aliquots that have not been tracked yet in the eCRF
     $sql = "SELECT DISTINCT sa.ID_SHIPMENT, a.ID_PATIENT FROM SHIPPED_ALIQUOTS sa, SHIPMENTS s, ALIQUOTS a
-            WHERE s.ID_SHIPMENT=sa.ID_SHIPMENT AND s.ID_STATUS='SHIPPED' AND sa.ID_TASK IS NULL AND sa.ID_ALIQUOT = a.ID_ALIQUOT
+            WHERE s.ID_SHIPMENT=sa.ID_SHIPMENT AND s.ID_STATUS='SHIPPED' AND (sa.ID_TASK IS NULL OR sa.ID_TASK=0) AND sa.ID_ALIQUOT = a.ID_ALIQUOT
             ORDER BY s.SHIPMENT_DATE, a.ID_PATIENT;";
     $rst = Database::getInstance()->executeBindQuery($sql, ['statusId' => ShipmentStatus::SHIPPED]);
     $error = Database::getInstance()->getError();

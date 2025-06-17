@@ -28,9 +28,9 @@ if ($_SERVER['REQUEST_METHOD'] != 'POST') {
 // Response is always returned as JSON
 header('Content-type: application/json');
 
-$requestHeaders = getallheaders();
+$requestHeaders = array_change_key_case(getallheaders(), CASE_LOWER);
 // Check if the request contains the API token in the headers
-$authToken = array_key_exists('X-API-token', $requestHeaders) ? $requestHeaders['X-API-token'] : null;
+$authToken = array_key_exists('x-api-token', $requestHeaders) ? $requestHeaders['x-api-token'] : null;
 
 $function = $_GET['function'];
 $logger = ServiceLogger::init($GLOBALS['LOG_LEVEL'], $GLOBALS['LOG_DIR']);
@@ -97,8 +97,11 @@ return;
  */
 function initServiceSession($authToken, $parameters, $surrogateSession = true) {
     if (!$authToken) {
+        ServiceLogger::getInstance()->trace("No API token provided in the request headers. Use the session token provided in the parameters");
         // If an API token was not provided in the request headers, then check if it is provided in the parameters
         $authToken = loadParam($parameters, 'session');
+    } else {
+        ServiceLogger::getInstance()->trace("API token provided in the request headers");
     }
 
     /* Join the session of the user that is calling the service to retrieve the timezone and language */
@@ -108,6 +111,7 @@ function initServiceSession($authToken, $parameters, $surrogateSession = true) {
 
     /* All the operations will be performed by a "service" user */
     if ($surrogateSession) {
+        ServiceLogger::getInstance()->trace("A Service session will be created using the timezone and language of the user session");
         WSAPI::apiConnect($GLOBALS["WS_LINK"], null, $GLOBALS["SERVICE_USER"], $GLOBALS["SERVICE_PASSWORD"], null, null, false, $userLanguage,
                 $userTimezone);
     }

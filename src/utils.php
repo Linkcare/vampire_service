@@ -170,7 +170,23 @@ function str_split_multibyte($string, $split_length = 1, $encoding = null) {
     return $result;
 }
 
-function loadParam($parameters, $propertyName) {
-    return $parameters && property_exists($parameters, $propertyName) ? $parameters->$propertyName : null;
+function loadParam($parameters, $propertyName, $defaultValue = null) {
+    return $parameters && property_exists($parameters, $propertyName) ? $parameters->$propertyName : $defaultValue;
 }
 
+/**
+ * Removes the properties of the $filters object that are null, empty or a string of spaces.
+ *
+ * @param stdClass $filters
+ */
+function cleanFilters($filters) {
+    if (is_null($filters) || !is_object($filters)) {
+        return;
+    }
+
+    foreach ($filters as $property => $value) {
+        if (is_null($value) || (is_string($value) && trim($value) === '')) {
+            unset($filters->$property);
+        }
+    }
+}

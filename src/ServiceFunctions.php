@@ -129,6 +129,7 @@ class ServiceFunctions {
     static public function createShipmentTrackingTask($shipment, $patientId) {
         $api = LinkcareSoapAPI::getInstance();
 
+        $senderTeam = $api->team_get($shipment->sentFromId);
         $patientAdmissions = $api->case_admission_list($patientId);
         $admission = null;
         foreach ($patientAdmissions as $adm) {
@@ -219,8 +220,10 @@ class ServiceFunctions {
                 $api->form_set_all_answers($trackingForm->getId(), $questionsArray, true);
             }
 
-            $shipmentTask->setDate(DateHelper::datePart($shipment->sendDate));
-            $shipmentTask->setHour(DateHelper::timePart($shipment->sendDate));
+            // The Datetime of the TASK must be expressed in the local timezone of the sender Team
+            $localDate = DateHelper::UTCToLocal($shipment->sendDate, $senderTeam->getTimezone());
+            $shipmentTask->setDate(DateHelper::datePart($localDate));
+            $shipmentTask->setHour(DateHelper::timePart($localDate));
             $shipmentTask->save();
 
             /*

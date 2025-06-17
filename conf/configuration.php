@@ -14,7 +14,7 @@ $GLOBALS['LAB_TEAMS'] = ['SYNLAB' => ['is_lab' => 1, 'is_clinical_site' => 0], '
         'UNIOVI' => ['is_lab' => 1, 'is_clinical_site' => 0], 'UAB' => ['is_lab' => 1, 'is_clinical_site' => 0],
         'UMG' => ['is_lab' => 1, 'is_clinical_site' => 0], 'IGEA' => ['is_lab' => 1, 'is_clinical_site' => 1],
         'CQS' => ['is_lab' => 0, 'is_clinical_site' => 1], 'IPIN' => ['is_lab' => 0, 'is_clinical_site' => 1],
-        'AUTH' => ['is_lab' => 0, 'is_clinical_site' => 0], 'TEST_TEAM' => ['is_lab' => 0, 'is_clinical_site' => 1]];
+        'AUTH' => ['is_lab' => 0, 'is_clinical_site' => 0], 'TEST_TEAM' => ['is_lab' => 1, 'is_clinical_site' => 1]];
 
 /* Log level. Possible values: debug,trace,warning,error,none */
 $GLOBALS['LOG_LEVEL'] = 'debug';

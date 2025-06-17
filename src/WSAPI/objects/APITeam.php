@@ -5,6 +5,7 @@ class APITeam {
     private $code;
     private $name;
     private $type;
+    private $timezone;
     /** @var LinkcareSoapAPI $api */
     private $api;
     private $modified = true;
@@ -32,6 +33,7 @@ class APITeam {
         if (!$team->code) {
             $team->code = NullableString($xmlNode->team_code);
         }
+        $team->timezone = NullableString($xmlNode->timezone);
         $team->name = NullableString($xmlNode->name);
         $team->type = NullableString($xmlNode->unit);
         return $team;
@@ -75,6 +77,14 @@ class APITeam {
         return $this->type;
     }
 
+    /**
+     *
+     * @return string
+     */
+    public function getTimezone() {
+        return $this->timezone;
+    }
+
     /*
      * **********************************
      * SETTERS
@@ -102,6 +112,14 @@ class APITeam {
      */
     public function setType($value) {
         $this->type = $value;
+    }
+
+    /**
+     *
+     * @param string $value
+     */
+    public function setTimezone($value) {
+        $this->timezone = $value;
     }
 
     /*
@@ -139,5 +157,8 @@ class APITeam {
         $xml->createChildNode($parentNode, "team_code", $this->getCode());
         $xml->createChildNode($parentNode, "name", $this->getName());
         $xml->createChildNode($parentNode, "unit", $this->getType());
+        if ($this->getTimezone()) {
+            $xml->createChildNode($parentNode, "timezone", $this->getTimezone());
+        }
     }
 }

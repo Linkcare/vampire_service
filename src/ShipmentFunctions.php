@@ -21,7 +21,7 @@ function shipment_locations($parameters) {
 }
 
 /**
- * Loads the list of all shipments that can be viewed by the user.
+ * Loads the list of all shipments that have been sent from or to the TEAM of the active user's session.
  *
  * @param stdClass $parameters
  * @return ServiceResponse
@@ -31,15 +31,34 @@ function shipment_list($parameters) {
 
     $page = loadParam($parameters, 'page');
     $pageSize = loadParam($parameters, 'pageSize');
-
     $filters = loadParam($parameters, 'filters');
+    cleanFilters($filters);
+
     $arrVariables[':currentTeamId'] = $api->getSession()->getTeamId();
+    $arrVariables[':statusPreparing'] = ShipmentStatus::PREPARING;
+
+    $filterConditions = [];
+    if ($filters && property_exists($filters, 'ref') && $filters->ref) {
+        $likeExpr = Database::getInstance()->fnConcat("'%'", ':shipmentRef', "'%'");
+        $filterConditions[] = "SHIPMENT_REF LIKE $likeExpr";
+        $arrVariables[':shipmentRef'] = $filters->ref;
+    }
+    if ($filters && property_exists($filters, 'sentFrom') && $filters->sentFrom) {
+        $filterConditions[] = "ID_SENT_FROM=:sentFromId";
+        $arrVariables[':sentFromId'] = $filters->sentFrom;
+    }
+    if ($filters && property_exists($filters, 'sentTo') && $filters->sentTo) {
+        $filterConditions[] = "ID_SENT_TO=:sentToId";
+        $arrVariables[':sentToId'] = $filters->sentTo;
+    }
+
+    $filterSql = empty($filterConditions) ? "" : " AND " . implode(' AND ', $filterConditions);
 
     $queryColumns = "s.*, l1.NAME as SENT_FROM, l2.NAME as SENT_TO";
     $queryFromClause = "FROM SHIPMENTS s
                 LEFT JOIN LOCATIONS l1 ON s.ID_SENT_FROM = l1.ID_LOCATION
                 LEFT JOIN LOCATIONS l2 ON s.ID_SENT_TO = l2.ID_LOCATION
-            WHERE s.ID_SENT_FROM=:currentTeamId OR s.ID_SENT_TO=:currentTeamId";
+            WHERE (s.ID_SENT_FROM=:currentTeamId OR (s.ID_SENT_TO=:currentTeamId AND s.ID_STATUS <> :statusPreparing)) $filterSql";
     list($rst, $totalRows) = fetchWithPagination($queryColumns, $queryFromClause, $arrVariables, $pageSize, $page);
 
     $shipmentList = [];
@@ -109,11 +128,14 @@ function shipment_update($parameters, $status = null) {
     if (!$shipment) {
         throw new ServiceException(ErrorCodes::NOT_FOUND, "Shipment with ID " . $id . " not found");
     }
-    $shipment->ref = loadParam($parameters, 'ref');
-    $shipment->statusId = loadParam($parameters, 'status');
-    $shipment->sentFromId = loadParam($parameters, 'sentFromId');
-    $shipment->sentToId = loadParam($parameters, 'sentToId');
-    $shipment->senderId = loadParam($parameters, 'senderId');
+    $shipment->ref = loadParam($parameters, 'ref', $shipment->ref);
+    $shipment->statusId = loadParam($parameters, 'status', $shipment->statusId);
+    $shipment->sentFromId = loadParam($parameters, 'sentFromId', $shipment->sentFromId);
+    $shipment->sentToId = loadParam($parameters, 'sentToId', $shipment->sentToId);
+    $shipment->senderId = loadParam($parameters, 'senderId', $shipment->senderId);
+    $shipment->receptionDate = loadParam($parameters, 'receptionDate', $shipment->receptionDate);
+    $shipment->receiverId = loadParam($parameters, 'receiverId', $shipment->receiverId);
+    $shipment->receptionStatusId = loadParam($parameters, 'receptionStatusId', $shipment->receptionStatusId);
 
     updateShipment($shipment);
 
@@ -277,25 +299,36 @@ function shippable_aliquots($parameters) {
     $locationId = loadParam($parameters, 'locationId');
     $page = loadParam($parameters, 'page');
     $pageSize = loadParam($parameters, 'pageSize');
+    $filters = loadParam($parameters, 'filters');
+    cleanFilters($filters);
 
     $arrVariables = [':locationId' => $locationId, ':statusId' => AliquotStatus::AVAILABLE];
 
-    $conditions = [];
+    $filterConditions = [];
+    if ($filters && property_exists($filters, 'patientRef') && $filters->patientRef) {
+        $likeExpr = Database::getInstance()->fnConcat("'%'", ':patientRef', "'%'");
+        $filterConditions[] = "a.PATIENT_REF LIKE $likeExpr";
+        $arrVariables[':patientRef'] = $filters->patientRef;
+    }
+    if ($filters && property_exists($filters, 'type') && $filters->type) {
+        $likeExpr = Database::getInstance()->fnConcat("'%'", ':sampleType', "'%'");
+        $filterConditions[] = "a.SAMPLE_TYPE LIKE $likeExpr";
+        $arrVariables[':sampleType'] = $filters->type;
+    }
+
     if ($excludeIds = loadParam($parameters, 'excludeIds')) {
         $excludeIds = explode(',', $excludeIds);
         if (count($excludeIds) > 0) {
             $exclude = DbHelper::bindParamArray('exId', $parameters, $arrVariables);
-            $conditions[] = "a.ID_ALIQUOT NOT IN ($exclude)";
+            $filterConditions[] = "a.ID_ALIQUOT NOT IN ($exclude)";
         }
     }
 
-    $filter = "";
-    if (!empty($conditions)) {
-        $filter = 'AND ' . implode(' AND ', $conditions);
-    }
+    $filterSql = empty($filterConditions) ? "" : " AND " . implode(' AND ', $filterConditions);
 
     $queryColumns = "a.* , l.NAME AS LOCATION_NAME";
-    $queryFromClause = "FROM ALIQUOTS a LEFT JOIN LOCATIONS l ON a.ID_LOCATION = l.ID_LOCATION WHERE a.ID_LOCATION = :locationId AND a.ID_STATUS = :statusId $filter";
+    $queryFromClause = "FROM ALIQUOTS a LEFT JOIN LOCATIONS l ON a.ID_LOCATION = l.ID_LOCATION 
+                        WHERE a.ID_LOCATION = :locationId AND a.ID_STATUS = :statusId $filterSql";
     list($rst, $totalRows) = fetchWithPagination($queryColumns, $queryFromClause, $arrVariables, $pageSize, $page);
 
     $available = [];
@@ -356,12 +389,12 @@ function find_aliquot($parameters) {
 
     $aliquot = new stdClass();
     $aliquot->id = $rst->GetField('ID_ALIQUOT');
-    $aliquot->patientId = $rst->GetField('ID_PATIENT');
+    $aliquot->patientId = $rst->GetField('PATIENT_REF');
     $aliquot->type = $rst->GetField('SAMPLE_TYPE');
     $aliquot->locationId = $rst->GetField('ID_LOCATION');
-    $aliquot->locationName = $rst->GetField('LOCATION_NAME');
+    $aliquot->location = $rst->GetField('LOCATION_NAME');
     $aliquot->statusId = $rst->GetField('ID_STATUS');
-    $aliquot->statusName = AliquotStatus::getName($rst->GetField('ID_STATUS'));
+    $aliquot->status = AliquotStatus::getName($rst->GetField('ID_STATUS'));
     $aliquot->created = $rst->GetField('CREATED');
     $aliquot->lastUpdate = $rst->GetField('UPDATED');
 
