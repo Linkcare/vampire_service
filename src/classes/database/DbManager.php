@@ -38,6 +38,9 @@ abstract class DbManager {
     /** @var string */
     protected $dbType;
 
+    /** @var boolean If true, all DB exceptions will be thrown to the caller. If false, the caller is responsible for handling the error*/
+    private $throwExceptions = false;
+
     /** @var boolean */
     private $autoCommit;
     /** @var boolean */
@@ -388,6 +391,16 @@ abstract class DbManager {
     }
 
     /**
+     * Indicate whether the DB manager should throw exceptions when an error occurs or it should be handled by the caller.
+     * When an error occurs, the function getError() will always return an ErrorDescriptor object with the last error details,
+     *
+     * @param boolean $throw
+     */
+    final public function throwErrors($throw) {
+        $this->throwExceptions = $throw;
+    }
+
+    /**
      * Returns true if the connection to the DB server has been established
      *
      * @return boolean
@@ -478,6 +491,7 @@ abstract class DbManager {
             return new DbManagerResults();
         }
 
+        $rst = null;
         try {
             $rst = $this->executeSQL($query, $arrVariables, $limit, $offset);
             if ($log && $this->generateLogs) {
@@ -485,10 +499,23 @@ abstract class DbManager {
             }
         } catch (DbException $e) {
             $this->setError($e->getErrorCode(), $e->getMessage(), $query, $arrVariables);
-            $rst = new DbManagerResults();
+            if ($this->throwExceptions) {
+                throw $e;
+            } else {
+                // Don't throw exceptions. The caller is responsible for handling the error
+            }
         } catch (Exception $e) {
             $this->setError($e->getCode(), $e->getMessage(), $query, $arrVariables);
-            $rst = new DbManagerResults();
+            if ($this->throwExceptions) {
+                throw new DbException($this->getError(), $e->getMessage(), $e->getPrevious());
+            } else {
+                // Don't throw exceptions. The caller is responsible for handling the error
+            }
+        } finally {
+            // If the query failed, we return an empty DbManagerResults object
+            if (!$rst) {
+                $rst = new DbManagerResults();
+            }
         }
 
         return $rst;

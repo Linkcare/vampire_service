@@ -20,6 +20,7 @@ class Database {
             $dbData->ConnectServer();
             $dbData->setLogFunction(['Database', 'log']);
             $dbData->generateLogs(textToBool($GLOBALS['SQL_LOGS']));
+            $dbData->throwErrors(true);
             self::$instance = $dbData;
         } catch (Exception $e) {
             $errMsg = 'Database connection error: ' . $e->getMessage();

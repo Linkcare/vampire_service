@@ -37,6 +37,9 @@ class Aliquot {
     /** @var string */
     public $status;
 
+    /** @var string */
+    public $rejectionReason;
+
     /** @var number */
     public $shipmentId;
 
@@ -66,6 +69,7 @@ class Aliquot {
         $aliquot->sentTo = $rst->GetField('SENT_TO');
         $aliquot->statusId = $rst->GetField('ID_STATUS');
         $aliquot->status = AliquotStatus::getName($rst->GetField('ID_STATUS'));
+        $aliquot->rejectionReason = AliquotStatus::getName($rst->GetField('REJECTION_REASON'));
         $aliquot->shipmentId = AliquotStatus::getName($rst->GetField('ID_SHIPMENT'));
         $aliquot->created = DateHelper::UTCToLocal($rst->GetField('CREATED'), $timezone);
         $aliquot->lastUpdate = DateHelper::UTCToLocal($rst->GetField('UPDATED'), $timezone);
@@ -91,6 +95,7 @@ class Aliquot {
         $json->sentTo = $this->sentTo;
         $json->statusId = $this->statusId;
         $json->status = $this->status;
+        $json->rejectionReason = $this->rejectionReason;
         $json->shipmentId = $this->shipmentId;
         $json->created = DateHelper::UTCToLocal($this->created, $timezone);
         $json->lastUpdate = DateHelper::UTCToLocal($this->lastUpdate, $timezone);

@@ -3,10 +3,6 @@
 function shipment_locations($parameters) {
     $sql = "SELECT * FROM LOCATIONS WHERE IS_LAB=1";
     $rst = Database::getInstance()->executeBindQuery($sql);
-    $error = Database::getInstance()->getError();
-    if ($error->getErrCode()) {
-        throw new ServiceException($error->getErrCode(), $error->getErrorMessage());
-    }
 
     $locations = [];
     while ($rst->Next()) {
@@ -88,7 +84,7 @@ function shipment_create($parameters) {
     $sentFromId = loadParam($parameters, 'sentFromId');
     $sentToId = loadParam($parameters, 'sentToId');
     $senderId = loadParam($parameters, 'senderId');
-    $senderName = loadParam($parameters, 'senderName');
+    $senderName = loadParam($parameters, 'sender');
     if (!$sentFromId) {
         return new ServiceResponse(null, "It is mandatory to provide the location from which the shipment is sent");
     }
@@ -105,10 +101,6 @@ function shipment_create($parameters) {
 
     $sql = "INSERT INTO SHIPMENTS (SHIPMENT_REF, ID_STATUS, ID_SENT_FROM, ID_SENT_TO, ID_SENDER, SENDER) VALUES (:shipmentRef, :status, :sentFromId, :sentToId, :senderId, :senderName)";
     Database::getInstance()->executeBindQuery($sql, $arrVariables);
-    $error = Database::getInstance()->getError();
-    if ($error->getErrCode()) {
-        throw new ServiceException($error->getErrCode(), "Error creating shipment: " . $error->getErrorMessage());
-    }
 
     $data = new stdClass();
     Database::getInstance()->getLastInsertedId($data->id);
@@ -128,14 +120,20 @@ function shipment_update($parameters, $status = null) {
     if (!$shipment) {
         throw new ServiceException(ErrorCodes::NOT_FOUND, "Shipment with ID " . $id . " not found");
     }
+
+    $api = LinkcareSoapAPI::getInstance();
+    $timezone = $api->getSession()->getTimezone();
+
     $shipment->ref = loadParam($parameters, 'ref', $shipment->ref);
     $shipment->statusId = loadParam($parameters, 'status', $shipment->statusId);
     $shipment->sentFromId = loadParam($parameters, 'sentFromId', $shipment->sentFromId);
     $shipment->sentToId = loadParam($parameters, 'sentToId', $shipment->sentToId);
     $shipment->senderId = loadParam($parameters, 'senderId', $shipment->senderId);
-    $shipment->receptionDate = loadParam($parameters, 'receptionDate', $shipment->receptionDate);
+    $shipment->receptionDate = DateHelper::localToUTC(loadParam($parameters, 'receptionDate', $shipment->receptionDate), $timezone);
     $shipment->receiverId = loadParam($parameters, 'receiverId', $shipment->receiverId);
     $shipment->receptionStatusId = loadParam($parameters, 'receptionStatusId', $shipment->receptionStatusId);
+    $shipment->receptionStatusId = loadParam($parameters, 'receptionStatusId', $shipment->receptionStatusId);
+    $shipment->receptionComments = loadParam($parameters, 'receptionComments', $shipment->receptionComments);
 
     updateShipment($shipment);
 
@@ -143,6 +141,7 @@ function shipment_update($parameters, $status = null) {
 }
 
 /**
+ * Mark a shipment as "Sent"
  *
  * @param array $parameters
  */
@@ -150,17 +149,10 @@ function shipment_send($parameters) {
     $api = LinkcareSoapAPI::getInstance();
 
     $shipmentId = loadParam($parameters, 'id');
-
-    $sql = "SELECT * FROM SHIPMENTS s WHERE s.ID_SHIPMENT = :id";
-    $rst = Database::getInstance()->ExecuteBindQuery($sql, $shipmentId);
-    $error = Database::getInstance()->getError();
-    if ($error->getErrCode()) {
-        throw new ServiceException($error->getErrCode(), "Error loading shipment data: " . $error->getErrorMessage());
+    $shipment = Shipment::exists($shipmentId);
+    if (!$shipment) {
+        throw new ServiceException(ErrorCodes::NOT_FOUND, "Shipment $shipmentId not found");
     }
-    if (!$rst->Next()) {
-        throw new ServiceException(ErrorCodes::NOT_FOUND, "Shipment with ID: $shipmentId was not found");
-    }
-    $shipment = Shipment::fromDBRecord($rst);
 
     $sql = "SELECT COUNT(*) AS TOTAL_ALIQUOTS FROM ALIQUOTS WHERE ID_SHIPMENT=:id";
     $rst = Database::getInstance()->ExecuteBindQuery($sql, $shipmentId);
@@ -189,17 +181,13 @@ function shipment_send($parameters) {
 
     try {
         $user = $api->user_get($shipment->senderId);
-        $shipment->senderName = $user->getFullName();
+        $shipment->sender = $user->getFullName();
     } catch (Exception $e) {}
 
     // Update the last modification date of the aliquots and generate a tracking record
-    $arrVariables = [':shipmentId' => $shipmentId, ':updated' => $shipment->sendDate];
+    $arrVariables = [':shipmentId' => $shipmentId];
     $sql = "SELECT * FROM ALIQUOTS WHERE ID_SHIPMENT=:shipmentId";
     $rst = Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
-    $error = Database::getInstance()->getError();
-    if ($error->getErrCode()) {
-        throw new ServiceException($error->getErrCode(), "Error sending shipment: " . $error->getErrorMessage());
-    }
 
     $aliquotList = [];
     while ($rst->Next()) {
@@ -219,6 +207,101 @@ function shipment_send($parameters) {
 }
 
 /**
+ * Mark a shipment as "Received"
+ *
+ * @param array $parameters
+ */
+function shipment_ack_reception($parameters) {
+    $api = LinkcareSoapAPI::getInstance();
+
+    $shipmentId = loadParam($parameters, 'id');
+
+    $shipment = Shipment::exists($shipmentId);
+    if (!$shipment) {
+        throw new ServiceException(ErrorCodes::NOT_FOUND, "Shipment $shipmentId not found");
+    }
+
+    // Mark the shipment as "Received" and indicate the datetime
+    $api = LinkcareSoapAPI::getInstance();
+    $timezone = $api->getSession()->getTimezone();
+
+    $shipment->statusId = ShipmentStatus::RECEIVED;
+    $shipment->receptionDate = DateHelper::localToUTC(loadParam($parameters, 'receptionDate'), $timezone);
+    $shipment->receiverId = loadParam($parameters, 'receiverId');
+    $shipment->receiver = loadParam($parameters, 'receiver');
+    $shipment->receptionStatusId = loadParam($parameters, 'receptionStatusId');
+    $shipment->receptionComments = loadParam($parameters, 'receptionComments');
+
+    if (!$shipment->receptionDate) {
+        throw new ServiceException(ErrorCodes::DATA_MISSING, "Reception datetime was not informed but is mandatory for receiving a shipment");
+    }
+    if (!$shipment->receiverId) {
+        throw new ServiceException(ErrorCodes::DATA_MISSING, "Receiver Id was not informed but is mandatory for receiving a shipment");
+    }
+    if (!$shipment->receptionStatusId) {
+        throw new ServiceException(ErrorCodes::DATA_MISSING, "Reception status was not informed but is mandatory for receiving a shipment");
+    }
+
+    try {
+        $user = $api->user_get($shipment->receiverId);
+        $shipment->receiver = $user->getFullName();
+    } catch (Exception $e) {
+        $shipment->receiver = $shipment->receiverId;
+    }
+
+    if ($shipment->receptionStatusId != ReceptionStatus::PARTIALLY_BAD) {
+        $rejectionReason = $shipment->receptionStatusId == ReceptionStatus::ALL_GOOD ? null : AliquotDamage::WHOLE_DAMAGE;
+        $arrVariables = [':shipmentId' => $shipmentId, ':rejectionReason' => $rejectionReason];
+        $sql = "UPDATE SHIPPED_ALIQUOTS SET REJECTION_REASON = :rejectionReason WHERE ID_SHIPMENT = :shipmentId";
+        $rst = Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
+    }
+
+    // Update the new location, last modification date and the rejection reason (if any) of the aliquots
+    $sqls = [];
+    $arrVariables = [':shipmentId' => $shipmentId, ':updated' => $shipment->receptionDate, ':rejectedStatus' => AliquotStatus::REJECTED,
+            ':okStatus' => AliquotStatus::AVAILABLE, ':locationId' => $shipment->sentToId];
+    $sqls[] = "UPDATE ALIQUOTS a, SHIPPED_ALIQUOTS sa
+            SET a.UPDATED=:updated, a.ID_STATUS=:rejectedStatus, a.REJECTION_REASON=sa.REJECTION_REASON,
+                a.ID_LOCATION=:locationId, a.ID_SHIPMENT=NULL
+            WHERE
+                sa.ID_SHIPMENT=:shipmentId
+            	AND a.ID_ALIQUOT = sa.ID_ALIQUOT
+            	AND sa.REJECTION_REASON IS NOT NULL AND sa.REJECTION_REASON <> ''";
+    $sqls[] = "UPDATE ALIQUOTS a, SHIPPED_ALIQUOTS sa
+            SET a.UPDATED=:updated, a.ID_STATUS=:okStatus, a.REJECTION_REASON=NULL,
+                a.ID_LOCATION=:locationId, a.ID_SHIPMENT=NULL
+            WHERE
+                sa.ID_SHIPMENT=:shipmentId
+            	AND a.ID_ALIQUOT = sa.ID_ALIQUOT
+            	AND (sa.REJECTION_REASON IS NULL OR sa.REJECTION_REASON = '')";
+    foreach ($sqls as $sql) {
+        Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
+    }
+
+    // Generate a tracking record for each aliquot received
+    $arrVariables = [':shipmentId' => $shipmentId];
+    $sql = "SELECT * FROM ALIQUOTS WHERE ID_SHIPMENT=:shipmentId";
+    $rst = Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
+
+    $aliquotList = [];
+    $currentDate = DateHelper::currentDate();
+    while ($rst->Next()) {
+        $colNames = $rst->getColumnNames();
+        $aliquot = [];
+        foreach ($colNames as $colName) {
+            $aliquot[$colName] = $rst->GetField($colName);
+        }
+        $aliquot['UPDATED'] = $currentDate;
+        $aliquotList[] = $aliquot;
+    }
+
+    updateShipment($shipment);
+    ServiceFunctions::trackAliquots($aliquotList, null, $shipmentId);
+
+    return new ServiceResponse($shipment->d, null);
+}
+
+/**
  *
  * @param array $parameters
  */
@@ -227,10 +310,6 @@ function shipment_delete($parameters) {
 
     $sql = "SELECT * FROM SHIPMENTS s WHERE s.ID_SHIPMENT = :id";
     $rst = Database::getInstance()->ExecuteBindQuery($sql, $shipmentId);
-    $error = Database::getInstance()->getError();
-    if ($error->getErrCode()) {
-        throw new ServiceException($error->getErrCode(), "Error loading shipment data: " . $error->getErrorMessage());
-    }
     if (!$rst->Next()) {
         throw new ServiceException(ErrorCodes::NOT_FOUND, "Shipment with ID: $shipmentId was not found");
     }
@@ -247,10 +326,6 @@ function shipment_delete($parameters) {
     $sqls[] = "DELETE FROM SHIPMENTS WHERE ID_SHIPMENT=:id";
     foreach ($sqls as $sql) {
         Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
-        $error = Database::getInstance()->getError();
-        if ($error->getErrCode()) {
-            throw new ServiceException($error->getErrCode(), "Error deleting shipment: " . $error->getErrorMessage());
-        }
     }
 
     return new ServiceResponse($shipmentId, null);
@@ -273,10 +348,6 @@ function shipment_details($parameters) {
                 LEFT JOIN LOCATIONS l2 ON s.ID_SENT_TO = l2.ID_LOCATION
             WHERE s.ID_SHIPMENT = :shipmentId";
     $rst = Database::getInstance()->executeBindQuery($sql, $arrVariables);
-    $error = Database::getInstance()->getError();
-    if ($error->getErrCode()) {
-        throw new ServiceException($error->getErrCode(), $error->getErrorMessage());
-    }
 
     if (!$rst->Next()) {
         throw new ServiceException(ErrorCodes::NOT_FOUND, "Shipment not found");
@@ -379,10 +450,6 @@ function find_aliquot($parameters) {
 
     $sql = "SELECT a.* , l.NAME AS LOCATION_NAME FROM ALIQUOTS a LEFT JOIN LOCATIONS l ON a.ID_LOCATION = l.ID_LOCATION WHERE a.ID_ALIQUOT = :aliquotId $filter";
     $rst = Database::getInstance()->executeBindQuery($sql, $arrVariables);
-    $error = Database::getInstance()->getError();
-    if ($error->getErrCode()) {
-        return new ServiceResponse(null, $error->getErrorMessage());
-    }
     if (!$rst->Next()) {
         return new ServiceResponse(null, "Aliquot not found");
     }
@@ -414,20 +481,36 @@ function shipment_add_aliquot($params) {
         throw new ServiceException(ErrorCodes::NOT_FOUND, "Shipment with ID $shipmentId not found");
     }
 
-    $arrVariables = [':shipmentId' => $shipmentId, ':aliquotId' => $aliquotId, ':statusId' => AliquotStatus::IN_TRANSIT];
-    $sql = "INSERT INTO SHIPPED_ALIQUOTS (ID_SHIPMENT, ID_ALIQUOT, ID_STATUS) VALUES (:shipmentId, :aliquotId, :statusId)";
+    $arrVariables = [':shipmentId' => $shipmentId, ':aliquotId' => $aliquotId];
+    $sql = "INSERT INTO SHIPPED_ALIQUOTS (ID_SHIPMENT, ID_ALIQUOT) VALUES (:shipmentId, :aliquotId)";
     Database::getInstance()->executeBindQuery($sql, $arrVariables);
-    $error = Database::getInstance()->getError();
-    if (!$error->errCode) {
-        // Update also the current status of the aliquot
-        $arrVariables = [':shipmentId' => $shipmentId, ':aliquotId' => $aliquotId, ':statusId' => AliquotStatus::IN_TRANSIT];
-        $sql = "UPDATE ALIQUOTS SET ID_STATUS = :statusId, ID_SHIPMENT=:shipmentId WHERE ID_ALIQUOT = :aliquotId";
-        Database::getInstance()->executeBindQuery($sql, $arrVariables);
-        $error = Database::getInstance()->getError();
+
+    // Update also the current status of the aliquot
+    $arrVariables = [':shipmentId' => $shipmentId, ':aliquotId' => $aliquotId, ':statusId' => AliquotStatus::IN_TRANSIT];
+    $sql = "UPDATE ALIQUOTS SET ID_STATUS = :statusId, ID_SHIPMENT=:shipmentId WHERE ID_ALIQUOT = :aliquotId";
+    Database::getInstance()->executeBindQuery($sql, $arrVariables);
+
+    return new ServiceResponse(1, null);
+}
+
+/**
+ * Marks an individual aliquot of a shipment as received.
+ *
+ * @param stdClass $params
+ */
+function shipment_receive_aliquot($params) {
+    $shipmentId = loadParam($params, 'shipmentId');
+    $aliquotId = loadParam($params, 'aliquotId');
+    $rejectionReason = loadParam($params, 'rejectionReason');
+    $rejectionReason = $rejectionReason ? $rejectionReason : null;
+
+    if (!Shipment::exists($shipmentId)) {
+        throw new ServiceException(ErrorCodes::NOT_FOUND, "Shipment with ID $shipmentId not found");
     }
-    if ($error->getErrCode()) {
-        throw new ServiceException($error->getErrCode(), $error->getErrorMessage());
-    }
+
+    $arrVariables = [':shipmentId' => $shipmentId, ':aliquotId' => $aliquotId, ':rejectionReason' => $rejectionReason];
+    $sql = "UPDATE SHIPPED_ALIQUOTS SET REJECTION_REASON=:rejectionReason WHERE ID_SHIPMENT=:shipmentId AND ID_ALIQUOT = :aliquotId)";
+    Database::getInstance()->executeBindQuery($sql, $arrVariables);
 
     return new ServiceResponse(1, null);
 }
@@ -448,17 +531,11 @@ function shipment_remove_aliquot($params) {
     $arrVariables = [':shipmentId' => $shipmentId, ':aliquotId' => $aliquotId];
     $sql = "DELETE FROM SHIPPED_ALIQUOTS WHERE ID_SHIPMENT=:shipmentId AND ID_ALIQUOT=:aliquotId";
     Database::getInstance()->executeBindQuery($sql, $arrVariables);
-    $error = Database::getInstance()->getError();
-    if (!$error->errCode) {
-        // Update also the current status of the aliquot
-        $arrVariables = [':shipmentId' => null, ':aliquotId' => $aliquotId, ':statusId' => AliquotStatus::AVAILABLE];
-        $sql = "UPDATE ALIQUOTS SET ID_STATUS = :statusId, ID_SHIPMENT=:shipmentId WHERE ID_ALIQUOT = :aliquotId";
-        Database::getInstance()->executeBindQuery($sql, $arrVariables);
-        $error = Database::getInstance()->getError();
-    }
-    if ($error->getErrCode()) {
-        throw new ServiceException($error->getErrCode(), $error->getErrorMessage());
-    }
+
+    // Update also the current status of the aliquot
+    $arrVariables = [':shipmentId' => null, ':aliquotId' => $aliquotId, ':statusId' => AliquotStatus::AVAILABLE];
+    $sql = "UPDATE ALIQUOTS SET ID_STATUS = :statusId, ID_SHIPMENT=:shipmentId WHERE ID_ALIQUOT = :aliquotId";
+    Database::getInstance()->executeBindQuery($sql, $arrVariables);
 
     return new ServiceResponse(1, null);
 }
@@ -485,43 +562,15 @@ function fetchWithPagination($queryColumns, $queryFromClause, $arrVariables, $pa
 
     $sqlFecth = "SELECT $queryColumns " . $queryFromClause;
     $sqlCount = "SELECT COUNT(*) AS TOTAL_ROWS " . $queryFromClause;
+
     $rstCount = Database::getInstance()->executeBindQuery($sqlCount, $arrVariables);
-    $error = Database::getInstance()->getError();
+    $rstCount->Next();
 
-    if (!$error->getErrCode()) {
-        $rstCount->Next();
-        $totalRows = $rstCount->GetField('TOTAL_ROWS');
-        $rst = Database::getInstance()->executeBindQuery($sqlFecth, $arrVariables, $pageSize, $offset);
-        $error = Database::getInstance()->getError();
-    }
-
-    if ($error->getErrCode()) {
-        throw new ServiceException($error->getErrCode(), $error->getErrorMessage());
-    }
+    $totalRows = $rstCount->GetField('TOTAL_ROWS');
+    $rst = Database::getInstance()->executeBindQuery($sqlFecth, $arrVariables, $pageSize, $offset);
 
     return [$rst, $totalRows];
 }
-
-/**
- * Checks if a shipment exists in the database.
- *
- * @param number $shipmentId
- * @return Shipment|null
- */
-// function shipmentExists($shipmentId) {
-// $arrVariables = [':shipmentId' => $shipmentId];
-// $sql = "SELECT ID_SHIPMENT FROM SHIPMENTS WHERE ID_SHIPMENT = :shipmentId";
-// $rst = Database::getInstance()->executeBindQuery($sql, $arrVariables);
-// $error = Database::getInstance()->getError();
-// if ($error->getErrCode()) {
-// throw new ServiceException($error->getErrCode(), $error->getErrorMessage());
-// }
-// if ($rst->Next()) {
-// return self::fromDBRecord($rst);
-// } else {
-// return null;
-// }
-// }
 
 /**
  *
@@ -546,9 +595,9 @@ function updateShipment($shipment) {
         $arrVariables[':senderId'] = $shipment->senderId;
         $updateFields[] = "ID_SENDER = :senderId";
     }
-    if ($shipment->senderName) {
-        $arrVariables[':senderName'] = $shipment->senderName;
-        $updateFields[] = "SENDER = :senderName";
+    if ($shipment->sender) {
+        $arrVariables[':sender'] = $shipment->sender;
+        $updateFields[] = "SENDER = :sender";
     }
     if ($shipment->statusId) {
         $arrVariables[':statusId'] = $shipment->statusId;
@@ -559,6 +608,31 @@ function updateShipment($shipment) {
         $updateFields[] = "SHIPMENT_DATE = :sendDate";
     }
 
+    if ($shipment->receiverId) {
+        $arrVariables[':receiverId'] = $shipment->receiverId;
+        $updateFields[] = "ID_RECEIVER = :receiverId";
+    }
+
+    if ($shipment->receiver) {
+        $arrVariables[':receiverName'] = $shipment->receiver;
+        $updateFields[] = "RECEIVER = :receiverName";
+    }
+
+    if ($shipment->receptionDate) {
+        $arrVariables[':receptionDate'] = $shipment->receptionDate;
+        $updateFields[] = "RECEPTION_DATE = :receptionDate";
+    }
+
+    if ($shipment->receptionStatusId) {
+        $arrVariables[':receptionStatusId'] = $shipment->receptionStatusId;
+        $updateFields[] = "ID_RECEPTION_STATUS = :receptionStatusId";
+    }
+
+    if ($shipment->receptionComments) {
+        $arrVariables[':receptionComments'] = $shipment->receptionComments;
+        $updateFields[] = "RECEPTION_COMMENTS = :receptionComments";
+    }
+
     if (empty($updateFields)) {
         throw new ServiceException(ErrorCodes::DATA_MISSING, "No data provided to update the shipment");
     }
@@ -566,8 +640,4 @@ function updateShipment($shipment) {
     $updateFields = implode(', ', $updateFields);
     $sql = "UPDATE SHIPMENTS SET $updateFields WHERE ID_SHIPMENT = :shipmentId";
     Database::getInstance()->executeBindQuery($sql, $arrVariables);
-    $error = Database::getInstance()->getError();
-    if ($error->getErrCode()) {
-        throw new ServiceException($error->getErrCode(), "Error updating shipment: " . $error->getErrorMessage());
-    }
 }

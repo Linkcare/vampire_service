@@ -7,4 +7,5 @@ abstract class AliquotDamage extends BasicEnum {
     const MISSING = 'MISSING';
     const DEFROST = 'DEFROST';
     const EXOSOMES_FAILURE = 'EXOSOMES_FAILURE';
+    const OTHER = 'OTHER';
 }

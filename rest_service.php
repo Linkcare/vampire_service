@@ -38,7 +38,7 @@ $logger = ServiceLogger::init($GLOBALS['LOG_LEVEL'], $GLOBALS['LOG_DIR']);
 $systemFunctions = ['deploy_service'];
 $programFunctions = ['add_aliquots', 'prepare_shipment', 'prepare_reception', 'prepare_samples_for_exosomes', 'update_samples_status', 'add_exosomes'];
 $shipmentManagementFunctions = [shipment_locations, 'shipment_list', 'shipment_create', 'shipment_details', 'shippable_aliquots', 'find_aliquot',
-        'shipment_add_aliquot', 'shipment_remove_aliquot', 'shipment_update', 'shipment_send', 'shipment_delete'];
+        'shipment_add_aliquot', 'shipment_remove_aliquot', 'shipment_update', 'shipment_send', 'shipment_ack_reception', 'shipment_delete'];
 
 $publicFunctions = array_merge($systemFunctions, $programFunctions, $shipmentManagementFunctions);
 

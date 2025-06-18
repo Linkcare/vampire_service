@@ -1,7 +1,7 @@
 <?php
 
 abstract class ReceptionStatus extends BasicEnum {
-    const ALL_GOOD = 1;
-    const PARTIALLY_BAD = 2;
-    const ALL_BAD = 3;
+    const ALL_GOOD = "ALL_GOOD";
+    const PARTIALLY_BAD = "PARTIALLY_BAD";
+    const ALL_BAD = "ALL_BAD";
 }

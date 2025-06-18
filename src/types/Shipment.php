@@ -40,14 +40,17 @@ class Shipment {
     /** @var number|null */
     public $receiverId;
 
+    /** @var string|null */
+    public $receiver;
+
     /** @var number|null */
     public $receptionStatusId;
 
     /** @var number */
     public $receptionStatus;
 
-    /** @var string|null */
-    public $receiver;
+    /** @var string */
+    public $receptionComments;
 
     /** @var Aliquot[] */
     private $aliquots = null;
@@ -76,6 +79,7 @@ class Shipment {
         $shipment->receiver = $rst->GetField('RECEIVER');
         $shipment->receptionStatusId = $rst->GetField('ID_RECEPTION_STATUS');
         $shipment->receptionStatus = ReceptionStatus::getName($shipment->receptionStatusId);
+        $shipment->receptionComments = $rst->GetField('RECEPTION_COMMENTS');
 
         return $shipment;
     }
@@ -98,6 +102,7 @@ class Shipment {
         $json->receiver = $this->receiver;
         $json->receptionStatusId = $this->receptionStatusId;
         $json->receptionStatus = ReceptionStatus::getName($this->receptionStatusId);
+        $json->receptionComments = $this->receptionComments;
 
         if (!empty($this->aliquots)) {
             $json->aliquots = [];
@@ -145,7 +150,7 @@ class Shipment {
      */
     public function getAliquots($patientId = null, $timezone = null) {
         if ($this->aliquots === null) {
-            $sql = "SELECT a.* FROM SHIPPED_ALIQUOTS sa JOIN ALIQUOTS a ON a.ID_ALIQUOT = sa.ID_ALIQUOT WHERE sa.ID_SHIPMENT = :id";
+            $sql = "SELECT a.*, sa.REJECTION_REASON AS REJ FROM SHIPPED_ALIQUOTS sa JOIN ALIQUOTS a ON a.ID_ALIQUOT = sa.ID_ALIQUOT WHERE sa.ID_SHIPMENT = :id";
             $rst = Database::getInstance()->executeBindQuery($sql, $this->id);
             $error = Database::getInstance()->getError();
             if ($error->getErrCode()) {
@@ -155,6 +160,8 @@ class Shipment {
             $this->aliquots = [];
             while ($rst->Next()) {
                 $aliquot = Aliquot::fromDBRecord($rst, $timezone);
+                // Use the Rejection reason from the shipped aliquots table (not the current rejection reason assigned to the aliquot)
+                $aliquot->rejectionReason = $rst->getField('REJ');
                 $this->aliquots[] = $aliquot;
             }
         }

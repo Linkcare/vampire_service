@@ -41,6 +41,8 @@ class DbDataModels {
         $columns[] = new DbColumnDefinition('RECEPTION_DATE', DbDataTypes::DATETIME);
         $columns[] = new DbColumnDefinition('ID_RECEIVER', DbDataTypes::VARCHAR, 32);
         $columns[] = new DbColumnDefinition('RECEIVER', DbDataTypes::VARCHAR, 128);
+        $columns[] = new DbColumnDefinition('ID_RECEPTION_STATUS', DbDataTypes::VARCHAR, 32);
+        $columns[] = new DbColumnDefinition('RECEPTION_COMMENTS', DbDataTypes::TEXT);
         $indexes[] = new DbIndexDefinition('SHIPMENT_REF_IDX', ['SHIPMENT_REF'], true);
         $tables[] = new DbTableDefinition('SHIPMENTS', $columns, 'ID_SHIPMENT', $indexes, true);
 
@@ -69,7 +71,7 @@ class DbDataModels {
         $indexes = null;
         $columns[] = new DbColumnDefinition('ID_HISTORY', DbDataTypes::BIGINT, null, null, false, null, true);
         $columns[] = new DbColumnDefinition('ID_ALIQUOT', DbDataTypes::VARCHAR, 64, null, false);
-        $columns[] = new DbColumnDefinition('ID_TASK', DbDataTypes::BIGINT, 32, null, false);
+        $columns[] = new DbColumnDefinition('ID_TASK', DbDataTypes::BIGINT, null, null, false);
         $columns[] = new DbColumnDefinition('ID_LOCATION', DbDataTypes::VARCHAR, 32, null, false);
         $columns[] = new DbColumnDefinition('ID_STATUS', DbDataTypes::VARCHAR, 32, null, false);
         $columns[] = new DbColumnDefinition('REJECTION_REASON', DbDataTypes::VARCHAR, 64);
@@ -83,8 +85,9 @@ class DbDataModels {
         $indexes = null;
         $columns[] = new DbColumnDefinition('ID_SHIPMENT', DbDataTypes::BIGINT, null, null, false);
         $columns[] = new DbColumnDefinition('ID_ALIQUOT', DbDataTypes::VARCHAR, 64, null, false);
-        $columns[] = new DbColumnDefinition('ID_STATUS', DbDataTypes::VARCHAR, 32, null, false);
-        $columns[] = new DbColumnDefinition('ID_TASK', DbDataTypes::BIGINT, 32, null, false);
+        $columns[] = new DbColumnDefinition('REJECTION_REASON', DbDataTypes::VARCHAR, 64);
+        $columns[] = new DbColumnDefinition('ID_SHIPMENT_TASK', DbDataTypes::BIGINT);
+        $columns[] = new DbColumnDefinition('ID_RECEPTION_TASK', DbDataTypes::BIGINT);
         $indexes[] = new DbIndexDefinition('ID_ALIQUOT_IDX', ['ID_ALIQUOT']);
         $tables[] = new DbTableDefinition('SHIPPED_ALIQUOTS', $columns, ['ID_SHIPMENT', 'ID_ALIQUOT'], $indexes);
         $fks[] = new DbFKDefinition('SHIPMENT_ALIQUOTS_FK1', 'SHIPPED_ALIQUOTS', ['ID_SHIPMENT'], 'SHIPMENTS', ['ID_SHIPMENT']);
