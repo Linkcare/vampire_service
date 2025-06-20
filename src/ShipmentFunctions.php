@@ -114,7 +114,7 @@ function shipment_create($parameters) {
  * @param array $parameters
  * @return ServiceResponse
  */
-function shipment_update($parameters, $status = null) {
+function shipment_update($parameters) {
     $id = loadParam($parameters, 'id');
     $shipment = Shipment::exists($id);
     if (!$shipment) {
@@ -124,20 +124,11 @@ function shipment_update($parameters, $status = null) {
     $api = LinkcareSoapAPI::getInstance();
     $timezone = $api->getSession()->getTimezone();
 
-    $shipment->ref = loadParam($parameters, 'ref', $shipment->ref);
-    $shipment->statusId = loadParam($parameters, 'status', $shipment->statusId);
-    $shipment->sentFromId = loadParam($parameters, 'sentFromId', $shipment->sentFromId);
-    $shipment->sentToId = loadParam($parameters, 'sentToId', $shipment->sentToId);
-    $shipment->senderId = loadParam($parameters, 'senderId', $shipment->senderId);
-    $shipment->receptionDate = DateHelper::localToUTC(loadParam($parameters, 'receptionDate', $shipment->receptionDate), $timezone);
-    $shipment->receiverId = loadParam($parameters, 'receiverId', $shipment->receiverId);
-    $shipment->receptionStatusId = loadParam($parameters, 'receptionStatusId', $shipment->receptionStatusId);
-    $shipment->receptionStatusId = loadParam($parameters, 'receptionStatusId', $shipment->receptionStatusId);
-    $shipment->receptionComments = loadParam($parameters, 'receptionComments', $shipment->receptionComments);
+    // Copy the parameters received tracking the modified ones
+    $shipment->trackedCopy($parameters, $timezone);
+    $shipment->updateModified();
 
-    updateShipment($shipment);
-
-    return new ServiceResponse($shipment->d, null);
+    return new ServiceResponse($shipment->id, null);
 }
 
 /**
@@ -164,11 +155,10 @@ function shipment_send($parameters) {
     }
 
     // Mark the shipment as "Shipped" and indicate the datetime
-    $shipment->statusId = ShipmentStatus::SHIPPED;
-    $shipment->sendDate = DateHelper::currentDate();
-    $shipment->senderId = loadParam($parameters, 'senderId');
-    $shipment->sentToId = loadParam($parameters, 'sentToId');
+    $parameters->statusId = ShipmentStatus::SHIPPED;
+    $parameters->sendDate = DateHelper::currentDate();
 
+    $shipment->trackedCopy($parameters);
     if (!$shipment->ref) {
         throw new ServiceException(ErrorCodes::DATA_MISSING, "Shipment reference was not informed but is mandatory for sending a shipment");
     }
@@ -181,7 +171,7 @@ function shipment_send($parameters) {
 
     try {
         $user = $api->user_get($shipment->senderId);
-        $shipment->sender = $user->getFullName();
+        $parameters->sender = $user->getFullName();
     } catch (Exception $e) {}
 
     // Update the last modification date of the aliquots and generate a tracking record
@@ -200,8 +190,31 @@ function shipment_send($parameters) {
         $aliquotList[] = $aliquot;
     }
 
-    updateShipment($shipment);
+    $shipment->updateModified($shipment);
     ServiceFunctions::trackAliquots($aliquotList, null, $shipmentId);
+
+    return new ServiceResponse($shipment->d, null);
+}
+
+/**
+ *
+ * @param stdClass $parameters
+ * @return ServiceResponse
+ */
+function shipment_start_reception($parameters) {
+    $shipmentId = loadParam($parameters, 'id');
+    $shipment = Shipment::exists($shipmentId);
+    if (!$shipment) {
+        throw new ServiceException(ErrorCodes::NOT_FOUND, "Shipment $shipmentId not found");
+    }
+
+    // Mark the shipment as "Receiving"
+    $modify = new stdClass();
+    $modify->statusId = ShipmentStatus::RECEIVING;
+
+    $shipment->trackedCopy($modify);
+
+    $shipment->updateModified();
 
     return new ServiceResponse($shipment->d, null);
 }
@@ -211,8 +224,11 @@ function shipment_send($parameters) {
  *
  * @param array $parameters
  */
-function shipment_ack_reception($parameters) {
+function shipment_finish_reception($parameters) {
     $api = LinkcareSoapAPI::getInstance();
+
+    preserveProperties($parameters, ['id', 'receptionDate', 'receiverId', 'receptionStatusId', 'receptionComments']);
+    $parameters->statusId = ShipmentStatus::RECEIVED;
 
     $shipmentId = loadParam($parameters, 'id');
 
@@ -221,16 +237,18 @@ function shipment_ack_reception($parameters) {
         throw new ServiceException(ErrorCodes::NOT_FOUND, "Shipment $shipmentId not found");
     }
 
+    try {
+        $user = $api->user_get($parameters->receiverId);
+        $parameters->receiver = $user->getFullName();
+    } catch (Exception $e) {
+        $parameters->receiver = $parameters->receiverId;
+    }
     // Mark the shipment as "Received" and indicate the datetime
     $api = LinkcareSoapAPI::getInstance();
     $timezone = $api->getSession()->getTimezone();
 
-    $shipment->statusId = ShipmentStatus::RECEIVED;
-    $shipment->receptionDate = DateHelper::localToUTC(loadParam($parameters, 'receptionDate'), $timezone);
-    $shipment->receiverId = loadParam($parameters, 'receiverId');
-    $shipment->receiver = loadParam($parameters, 'receiver');
-    $shipment->receptionStatusId = loadParam($parameters, 'receptionStatusId');
-    $shipment->receptionComments = loadParam($parameters, 'receptionComments');
+    error_log("PARAMETERS: " . json_encode($parameters));
+    $shipment->trackedCopy($parameters, $timezone);
 
     if (!$shipment->receptionDate) {
         throw new ServiceException(ErrorCodes::DATA_MISSING, "Reception datetime was not informed but is mandatory for receiving a shipment");
@@ -242,45 +260,33 @@ function shipment_ack_reception($parameters) {
         throw new ServiceException(ErrorCodes::DATA_MISSING, "Reception status was not informed but is mandatory for receiving a shipment");
     }
 
-    try {
-        $user = $api->user_get($shipment->receiverId);
-        $shipment->receiver = $user->getFullName();
-    } catch (Exception $e) {
-        $shipment->receiver = $shipment->receiverId;
-    }
-
-    if ($shipment->receptionStatusId != ReceptionStatus::PARTIALLY_BAD) {
-        $rejectionReason = $shipment->receptionStatusId == ReceptionStatus::ALL_GOOD ? null : AliquotDamage::WHOLE_DAMAGE;
-        $arrVariables = [':shipmentId' => $shipmentId, ':rejectionReason' => $rejectionReason];
-        $sql = "UPDATE SHIPPED_ALIQUOTS SET REJECTION_REASON = :rejectionReason WHERE ID_SHIPMENT = :shipmentId";
-        $rst = Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
-    }
+    $shipment->updateModified();
 
     // Update the new location, last modification date and the rejection reason (if any) of the aliquots
     $sqls = [];
     $arrVariables = [':shipmentId' => $shipmentId, ':updated' => $shipment->receptionDate, ':rejectedStatus' => AliquotStatus::REJECTED,
             ':okStatus' => AliquotStatus::AVAILABLE, ':locationId' => $shipment->sentToId];
     $sqls[] = "UPDATE ALIQUOTS a, SHIPPED_ALIQUOTS sa
-            SET a.UPDATED=:updated, a.ID_STATUS=:rejectedStatus, a.REJECTION_REASON=sa.REJECTION_REASON,
+            SET a.UPDATED=:updated, a.ID_STATUS=:rejectedStatus, a.ID_ALIQUOT_CONDITION=sa.ID_ALIQUOT_CONDITION,
                 a.ID_LOCATION=:locationId, a.ID_SHIPMENT=NULL
             WHERE
                 sa.ID_SHIPMENT=:shipmentId
             	AND a.ID_ALIQUOT = sa.ID_ALIQUOT
-            	AND sa.REJECTION_REASON IS NOT NULL AND sa.REJECTION_REASON <> ''";
+            	AND sa.ID_ALIQUOT_CONDITION IS NOT NULL AND sa.ID_ALIQUOT_CONDITION <> ''";
     $sqls[] = "UPDATE ALIQUOTS a, SHIPPED_ALIQUOTS sa
-            SET a.UPDATED=:updated, a.ID_STATUS=:okStatus, a.REJECTION_REASON=NULL,
+            SET a.UPDATED=:updated, a.ID_STATUS=:okStatus, a.ID_ALIQUOT_CONDITION=NULL,
                 a.ID_LOCATION=:locationId, a.ID_SHIPMENT=NULL
             WHERE
                 sa.ID_SHIPMENT=:shipmentId
             	AND a.ID_ALIQUOT = sa.ID_ALIQUOT
-            	AND (sa.REJECTION_REASON IS NULL OR sa.REJECTION_REASON = '')";
+            	AND (sa.ID_ALIQUOT_CONDITION IS NULL OR sa.ID_ALIQUOT_CONDITION = '')";
     foreach ($sqls as $sql) {
         Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
     }
 
     // Generate a tracking record for each aliquot received
     $arrVariables = [':shipmentId' => $shipmentId];
-    $sql = "SELECT * FROM ALIQUOTS WHERE ID_SHIPMENT=:shipmentId";
+    $sql = "SELECT * FROM ALIQUOTS WHERE ID_ALIQUOT IN (SELECT ID_ALIQUOT FROM SHIPPED_ALIQUOTS WHERE ID_SHIPMENT = :shipmentId)";
     $rst = Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
 
     $aliquotList = [];
@@ -295,8 +301,7 @@ function shipment_ack_reception($parameters) {
         $aliquotList[] = $aliquot;
     }
 
-    updateShipment($shipment);
-    ServiceFunctions::trackAliquots($aliquotList, null, $shipmentId);
+    ServiceFunctions::trackAliquots($aliquotList);
 
     return new ServiceResponse($shipment->d, null);
 }
@@ -498,18 +503,18 @@ function shipment_add_aliquot($params) {
  *
  * @param stdClass $params
  */
-function shipment_receive_aliquot($params) {
+function shipment_set_aliquot_condition($params) {
     $shipmentId = loadParam($params, 'shipmentId');
     $aliquotId = loadParam($params, 'aliquotId');
-    $rejectionReason = loadParam($params, 'rejectionReason');
-    $rejectionReason = $rejectionReason ? $rejectionReason : null;
+    $conditionId = loadParam($params, 'conditionId');
+    $conditionId = $conditionId ? $conditionId : null;
 
     if (!Shipment::exists($shipmentId)) {
         throw new ServiceException(ErrorCodes::NOT_FOUND, "Shipment with ID $shipmentId not found");
     }
 
-    $arrVariables = [':shipmentId' => $shipmentId, ':aliquotId' => $aliquotId, ':rejectionReason' => $rejectionReason];
-    $sql = "UPDATE SHIPPED_ALIQUOTS SET REJECTION_REASON=:rejectionReason WHERE ID_SHIPMENT=:shipmentId AND ID_ALIQUOT = :aliquotId)";
+    $arrVariables = [':shipmentId' => $shipmentId, ':aliquotId' => $aliquotId, ':conditionId' => $conditionId];
+    $sql = "UPDATE SHIPPED_ALIQUOTS SET ID_ALIQUOT_CONDITION=:conditionId WHERE ID_SHIPMENT=:shipmentId AND ID_ALIQUOT = :aliquotId";
     Database::getInstance()->executeBindQuery($sql, $arrVariables);
 
     return new ServiceResponse(1, null);
@@ -570,74 +575,4 @@ function fetchWithPagination($queryColumns, $queryFromClause, $arrVariables, $pa
     $rst = Database::getInstance()->executeBindQuery($sqlFecth, $arrVariables, $pageSize, $offset);
 
     return [$rst, $totalRows];
-}
-
-/**
- *
- * @param Shipment $shipment
- */
-function updateShipment($shipment) {
-    $arrVariables = [':shipmentId' => $shipment->id];
-    $updateFields = [];
-    if ($shipment->ref) {
-        $arrVariables[':shipmentRef'] = $shipment->ref;
-        $updateFields[] = "SHIPMENT_REF = :shipmentRef";
-    }
-    if ($shipment->sentFromId) {
-        $arrVariables[':sentFromId'] = $shipment->sentFromId;
-        $updateFields[] = "ID_SENT_FROM = :sentFromId";
-    }
-    if ($shipment->sentToId) {
-        $arrVariables[':sentToId'] = $shipment->sentToId;
-        $updateFields[] = "ID_SENT_TO = :sentToId";
-    }
-    if ($shipment->senderId) {
-        $arrVariables[':senderId'] = $shipment->senderId;
-        $updateFields[] = "ID_SENDER = :senderId";
-    }
-    if ($shipment->sender) {
-        $arrVariables[':sender'] = $shipment->sender;
-        $updateFields[] = "SENDER = :sender";
-    }
-    if ($shipment->statusId) {
-        $arrVariables[':statusId'] = $shipment->statusId;
-        $updateFields[] = "ID_STATUS = :statusId";
-    }
-    if ($shipment->sendDate) {
-        $arrVariables[':sendDate'] = $shipment->sendDate;
-        $updateFields[] = "SHIPMENT_DATE = :sendDate";
-    }
-
-    if ($shipment->receiverId) {
-        $arrVariables[':receiverId'] = $shipment->receiverId;
-        $updateFields[] = "ID_RECEIVER = :receiverId";
-    }
-
-    if ($shipment->receiver) {
-        $arrVariables[':receiverName'] = $shipment->receiver;
-        $updateFields[] = "RECEIVER = :receiverName";
-    }
-
-    if ($shipment->receptionDate) {
-        $arrVariables[':receptionDate'] = $shipment->receptionDate;
-        $updateFields[] = "RECEPTION_DATE = :receptionDate";
-    }
-
-    if ($shipment->receptionStatusId) {
-        $arrVariables[':receptionStatusId'] = $shipment->receptionStatusId;
-        $updateFields[] = "ID_RECEPTION_STATUS = :receptionStatusId";
-    }
-
-    if ($shipment->receptionComments) {
-        $arrVariables[':receptionComments'] = $shipment->receptionComments;
-        $updateFields[] = "RECEPTION_COMMENTS = :receptionComments";
-    }
-
-    if (empty($updateFields)) {
-        throw new ServiceException(ErrorCodes::DATA_MISSING, "No data provided to update the shipment");
-    }
-
-    $updateFields = implode(', ', $updateFields);
-    $sql = "UPDATE SHIPMENTS SET $updateFields WHERE ID_SHIPMENT = :shipmentId";
-    Database::getInstance()->executeBindQuery($sql, $arrVariables);
 }

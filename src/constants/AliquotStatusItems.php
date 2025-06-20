@@ -5,7 +5,7 @@ abstract class AliquotStatusItems extends BasicEnum {
     const SHIPMENT_REF = 'ALIQUOT_SHIPMENT_REF';
     const ARRAY = 'ALIQUOTS_ARRAY';
     const ID = 'ALIQUOT_ID';
-    const TYPE = 'ALIQUOT_TYPE';
+    const TYPE = 'SAMPLE_TYPE';
     const LOCATION = 'ALIQUOT_LOCATION';
     const CREATION_DATE = 'ALIQUOT_CREATION_DATE';
     const CREATION_TIME = 'ALIQUOT_CREATION_TIME';

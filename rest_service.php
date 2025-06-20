@@ -36,9 +36,10 @@ $function = $_GET['function'];
 $logger = ServiceLogger::init($GLOBALS['LOG_LEVEL'], $GLOBALS['LOG_DIR']);
 
 $systemFunctions = ['deploy_service'];
-$programFunctions = ['add_aliquots', 'prepare_shipment', 'prepare_reception', 'prepare_samples_for_exosomes', 'update_samples_status', 'add_exosomes'];
+$programFunctions = ['add_aliquots', 'prepare_samples_for_exosomes', 'add_exosomes'];
 $shipmentManagementFunctions = [shipment_locations, 'shipment_list', 'shipment_create', 'shipment_details', 'shippable_aliquots', 'find_aliquot',
-        'shipment_add_aliquot', 'shipment_remove_aliquot', 'shipment_update', 'shipment_send', 'shipment_ack_reception', 'shipment_delete'];
+        'shipment_add_aliquot', 'shipment_remove_aliquot', 'shipment_update', 'shipment_send', 'shipment_start_reception', 'shipment_finish_reception',
+        'shipment_delete', 'shipment_set_aliquot_condition'];
 
 $publicFunctions = array_merge($systemFunctions, $programFunctions, $shipmentManagementFunctions);
 
@@ -174,43 +175,6 @@ function add_exosomes($parameters) {
 }
 
 /**
- * Prepares a TASK for a blood sample shipment.
- *
- * @deprecated
- * @param stdClass $parameters
- */
-function prepare_shipment($parameters) {
-    // Reference of the FORM that is initializing a shipment
-    $preparationFormId = loadParam($parameters, 'preparation_form');
-    // Reference of the FORM that will contain the aliquots that can potentially be included in a shipment
-    $shipmentFormId = loadParam($parameters, 'shipment_form');
-    /*
-     * Reference of the Team that is performing the shipment. Only the aliquots that belong to this Team and are available can be included in the
-     * shipment
-     */
-    $senderId = loadParam($parameters, 'sender');
-    // Type of blood sample (WHOLE_BLOOD, PLASMA...)
-    $sampleType = strtoupper(loadParam($parameters, 'sample_type'));
-
-    return ServiceFunctions::prepareShipment($preparationFormId, $shipmentFormId, $sampleType, $senderId);
-}
-
-/**
- * Prepares a TASK for a blood sample shipment.
- *
- * @deprecated
- * @param stdClass $parameters
- */
-function prepare_reception($parameters) {
-    // Reference of the FORM that will contain the aliquots that are included included in the shipment that is being received
-    $shipmentFormId = loadParam($parameters, 'shipment_form');
-    // Reference of the FORM where the aliquots that are included in the shipment will be copied so that a user can indicate the reception status
-    $receptionFormId = loadParam($parameters, 'reception_form');
-
-    return ServiceFunctions::prepareReception($shipmentFormId, $receptionFormId);
-}
-
-/**
  * Prepares a TASK for selecting the blood samples that have been used to extract exosomes
  *
  * @param stdClass $parameters
@@ -232,6 +196,7 @@ function prepare_samples_for_exosomes($parameters) {
 /**
  * Updates the status of a set of aliquots.
  *
+ * @deprecated
  * @param stdClass $parameters
  * @return ServiceResponse
  */

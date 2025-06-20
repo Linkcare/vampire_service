@@ -175,6 +175,25 @@ function loadParam($parameters, $propertyName, $defaultValue = null) {
 }
 
 /**
+ * Modifies an object to preserve only the properties defined in the $properties array.
+ *
+ * @param stdClass $object
+ * @param string[] $properties
+ */
+function preserveProperties($object, $properties) {
+    if (!is_object($object) || !is_array($properties)) {
+        return;
+    }
+
+    $keys = array_keys(get_object_vars($object));
+    foreach ($keys as $key) {
+        if (!in_array($key, $properties)) {
+            unset($object->$key);
+        }
+    }
+}
+
+/**
  * Removes the properties of the $filters object that are null, empty or a string of spaces.
  *
  * @param stdClass $filters

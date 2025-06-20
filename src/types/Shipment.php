@@ -54,6 +54,7 @@ class Shipment {
 
     /** @var Aliquot[] */
     private $aliquots = null;
+    private $modifiedProperties = [];
 
     /**
      *
@@ -115,6 +116,55 @@ class Shipment {
     }
 
     /**
+     * Updates a Shipment from a JSON tracking the modified properties.
+     * If the JSON object does not have a property defined, it is ignored.
+     *
+     * @param stdClass $json
+     * @param string $timezone
+     * @return Shipment
+     */
+    public function trackedCopy($json, $timezone = null) {
+        $this->modifiedProperties = []; // Reset the list of modified properties
+
+        $this->trackedPropertyCopy($json, 'ref');
+        $this->trackedPropertyCopy($json, 'statusId');
+        $this->trackedPropertyCopy($json, 'sentFromId');
+        $this->trackedPropertyCopy($json, 'sentToId');
+        $this->trackedPropertyCopy($json, 'sendDate', $timezone);
+        $this->trackedPropertyCopy($json, 'senderId');
+        $this->trackedPropertyCopy($json, 'receptionDate', $timezone);
+        $this->trackedPropertyCopy($json, 'receiverId');
+        $this->trackedPropertyCopy($json, 'receiver');
+        $this->trackedPropertyCopy($json, 'receptionStatusId');
+        $this->trackedPropertyCopy($json, 'receptionComments');
+    }
+
+    private function trackedPropertyCopy($json, $propertyName, $timezone = null) {
+        if (!is_object($json)) {
+            return;
+        }
+        if (property_exists($json, $propertyName) && $this->$propertyName != $json->$propertyName) {
+            $this->modifiedProperties[$propertyName] = $this->$propertyName; // Store the previous value
+            if ($timezone) {
+                // Is a date that must be converted to UTC
+                $this->$propertyName = DateHelper::localToUTC($json->$propertyName, $timezone);
+            } else {
+                $this->$propertyName = $json->$propertyName;
+            }
+        }
+    }
+
+    /**
+     * Returns true if a property of the shipment has a property was modified.
+     *
+     * @param string $propertyName
+     * @return boolean
+     */
+    public function modified($propertyName) {
+        return array_key_exists($propertyName, $this->modifiedProperties);
+    }
+
+    /**
      * Checks if a shipment exists in the database.
      *
      * @param number $id
@@ -130,10 +180,6 @@ class Shipment {
             WHERE s.ID_SHIPMENT = :shipmentId";
 
         $rst = Database::getInstance()->executeBindQuery($sql, $arrVariables);
-        $error = Database::getInstance()->getError();
-        if ($error->getErrCode()) {
-            throw new ServiceException($error->getErrCode(), $error->getErrorMessage());
-        }
         if ($rst->Next()) {
             return self::fromDBRecord($rst);
         } else {
@@ -150,18 +196,14 @@ class Shipment {
      */
     public function getAliquots($patientId = null, $timezone = null) {
         if ($this->aliquots === null) {
-            $sql = "SELECT a.*, sa.REJECTION_REASON AS REJ FROM SHIPPED_ALIQUOTS sa JOIN ALIQUOTS a ON a.ID_ALIQUOT = sa.ID_ALIQUOT WHERE sa.ID_SHIPMENT = :id";
+            $sql = "SELECT a.*, sa.ID_ALIQUOT_CONDITION AS COND_RECEPTION  FROM SHIPPED_ALIQUOTS sa JOIN ALIQUOTS a ON a.ID_ALIQUOT = sa.ID_ALIQUOT WHERE sa.ID_SHIPMENT = :id";
             $rst = Database::getInstance()->executeBindQuery($sql, $this->id);
-            $error = Database::getInstance()->getError();
-            if ($error->getErrCode()) {
-                throw new ServiceException($error->getErrCode(), $error->getErrorMessage());
-            }
 
             $this->aliquots = [];
             while ($rst->Next()) {
                 $aliquot = Aliquot::fromDBRecord($rst, $timezone);
                 // Use the Rejection reason from the shipped aliquots table (not the current rejection reason assigned to the aliquot)
-                $aliquot->rejectionReason = $rst->getField('REJ');
+                $aliquot->conditionId = $rst->getField('COND_RECEPTION');
                 $this->aliquots[] = $aliquot;
             }
         }
@@ -173,5 +215,83 @@ class Shipment {
                 });
 
         return $aliquots;
+    }
+
+    /**
+     *
+     * @param Shipment $copyFrom
+     */
+    public function updateModified() {
+        $arrVariables = [':shipmentId' => $this->id];
+        $updateFields = [];
+
+        if ($this->modified('ref')) {
+            $arrVariables[':shipmentRef'] = $this->ref;
+            $updateFields[] = "SHIPMENT_REF = :shipmentRef";
+        }
+        if ($this->modified('sentFromId')) {
+            $arrVariables[':sentFromId'] = $this->sentFromId;
+            $updateFields[] = "ID_SENT_FROM = :sentFromId";
+        }
+        if ($this->modified('sentToId')) {
+            $arrVariables[':sentToId'] = $this->sentToId;
+            $updateFields[] = "ID_SENT_TO = :sentToId";
+        }
+        if ($this->modified('senderId')) {
+            $arrVariables[':senderId'] = $this->senderId;
+            $updateFields[] = "ID_SENDER = :senderId";
+        }
+        if ($this->modified('sender')) {
+            $arrVariables[':sender'] = $this->sender;
+            $updateFields[] = "SENDER = :sender";
+        }
+        if ($this->modified('statusId')) {
+            $arrVariables[':statusId'] = $this->statusId;
+            $updateFields[] = "ID_STATUS = :statusId";
+        }
+        if ($this->modified('sendDate')) {
+            $arrVariables[':sendDate'] = $this->sendDate;
+            $updateFields[] = "SHIPMENT_DATE = :sendDate";
+        }
+
+        if ($this->modified('receiverId')) {
+            $arrVariables[':receiverId'] = $this->receiverId;
+            $updateFields[] = "ID_RECEIVER = :receiverId";
+        }
+
+        if ($this->modified('receiver')) {
+            $arrVariables[':receiverName'] = $this->receiver;
+            $updateFields[] = "RECEIVER = :receiverName";
+        }
+
+        if ($this->modified('receptionDate')) {
+            $arrVariables[':receptionDate'] = $this->receptionDate;
+            $updateFields[] = "RECEPTION_DATE = :receptionDate";
+        }
+
+        if ($this->modified('receptionStatusId')) {
+            $arrVariables[':receptionStatusId'] = $this->receptionStatusId;
+            $updateFields[] = "ID_RECEPTION_STATUS = :receptionStatusId";
+        }
+
+        if ($this->modified('receptionComments')) {
+            $arrVariables[':receptionComments'] = $this->receptionComments;
+            $updateFields[] = "RECEPTION_COMMENTS = :receptionComments";
+        }
+
+        if (empty($updateFields)) {
+            throw new ServiceException(ErrorCodes::DATA_MISSING, "No data provided to update the shipment");
+        }
+
+        $updateFields = implode(', ', $updateFields);
+        $sql = "UPDATE SHIPMENTS SET $updateFields WHERE ID_SHIPMENT = :shipmentId";
+        Database::getInstance()->executeBindQuery($sql, $arrVariables);
+
+        if ($this->modified('receptionStatusId')) {
+            $conditionId = ($this->receptionStatusId == ReceptionStatus::ALL_BAD ? AliquotDamage::WHOLE_DAMAGE : null);
+            $arrVariables = [':shipmentId' => $this->id, ':conditionId' => $conditionId];
+            $sql = "UPDATE SHIPPED_ALIQUOTS SET ID_ALIQUOT_CONDITION = :conditionId WHERE ID_SHIPMENT = :shipmentId";
+            Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
+        }
     }
 }
