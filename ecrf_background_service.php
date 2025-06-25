@@ -173,7 +173,7 @@ function track_pending_receptions($parameters) {
                 'trackingTaskId' => $rst->GetField('ID_SHIPMENT_TASK')];
     }
     if (empty($pendingShipmentIds)) {
-        return new BackgroundServiceResponse(BackgroundServiceResponse::IDLE, 'No pending shipments to track.');
+        return new BackgroundServiceResponse(BackgroundServiceResponse::IDLE, 'No pending receptions to track.');
     }
 
     $shipment = null;
