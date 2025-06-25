@@ -71,8 +71,8 @@ class Aliquot {
         $aliquot->status = $rst->GetField('ID_STATUS');
         $aliquot->conditionId = $rst->GetField('ID_ALIQUOT_CONDITION');
         $aliquot->shipmentId = $rst->GetField('ID_SHIPMENT');
-        $aliquot->created = DateHelper::UTCToLocal($rst->GetField('CREATED'), $timezone);
-        $aliquot->lastUpdate = DateHelper::UTCToLocal($rst->GetField('UPDATED'), $timezone);
+        $aliquot->created = DateHelper::UTCToLocal($rst->GetField('ALIQUOT_CREATED'), $timezone);
+        $aliquot->lastUpdate = DateHelper::UTCToLocal($rst->GetField('ALIQUOT_UPDATED'), $timezone);
 
         return $aliquot;
     }

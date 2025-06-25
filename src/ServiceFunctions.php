@@ -1,6 +1,4 @@
 <?php
-use MongoDB\BSON\Type;
-use MongoDB\Driver\Exception\ServerException;
 
 class ServiceFunctions {
 
@@ -13,7 +11,7 @@ class ServiceFunctions {
      * @param string $procTime Blood processing time
      * @return ServiceResponse
      */
-    static public function addAliquots($patientId, $patientRef, $bloodProcessingFormId, $labTeamId, $procDate, $procTime) {
+    static public function addAliquots($patientId, $patientRef, $bloodProcessingFormId, $labTeamId, $procDate, $procTime, $overwriteExisting = false) {
         $api = LinkcareSoapAPI::getInstance();
 
         self::addLocation($labTeamId);
@@ -64,7 +62,7 @@ class ServiceFunctions {
             }
 
             // Load the existing aliquots of the status FORM. Additional rows will be appended for the new aliquots
-            $existingAliquotsArray = $destStatusForm->getArrayQuestions(AliquotStatusItems::ARRAY);
+            $existingAliquotsArray = $overwriteExisting ? [] : $destStatusForm->getArrayQuestions(AliquotStatusItems::ARRAY);
 
             $questionsArray = [];
             $questionsArray[] = self::updateTextQuestionValue($destStatusForm, AliquotStatusItems::SAMPLE_TYPE, $sampleType);
@@ -77,6 +75,9 @@ class ServiceFunctions {
 
             // Add the new aliquots to the status form
             $ix = count($existingAliquotsArray) + 1;
+            if ($overwriteExisting) {
+                error_log("Overwriting samples status in FORM " . $destStatusForm->getId() . " for sample type $sampleType. Starting at row $ix");
+            }
 
             foreach ($aliquotsArray as $row) {
                 $dbColumns = [];
@@ -90,8 +91,8 @@ class ServiceFunctions {
                 $dbColumns['ID_LOCATION'] = $labTeamId;
                 $dbColumns['ID_STATUS'] = AliquotStatus::AVAILABLE;
                 $dbColumns['ID_TASK'] = $processingForm->getParentId();
-                $dbColumns['CREATED'] = $procDateUTC;
-                $dbColumns['UPDATED'] = $procDateUTC;
+                $dbColumns['ALIQUOT_CREATED'] = $procDateUTC;
+                $dbColumns['ALIQUOT_UPDATED'] = $procDateUTC;
 
                 $questionsArray[] = self::updateArrayTextQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix, AliquotStatusItems::ID,
                         $aliquotId);
@@ -113,7 +114,7 @@ class ServiceFunctions {
             }
         }
 
-        self::trackAliquots($dbRows, $processingForm->getParentId());
+        self::trackAliquots($dbRows);
 
         // Concatenate the added aliquot IDs into a string
         $aliquotsIncluded = implode(',', $aliquotIds);
@@ -161,7 +162,7 @@ class ServiceFunctions {
         $api = LinkcareSoapAPI::getInstance();
 
         $senderTeam = $api->team_get($shipment->sentFromId);
-        $admission = findAdmission($patientId);
+        $admission = self::findAdmission($patientId);
 
         $initialValues = self::encodeTaskInitialValues(
                 [TrackingItems::SHIPMENT_ID => $shipment->id, TrackingItems::SHIPMENT_REF => $shipment->ref,
@@ -369,7 +370,8 @@ class ServiceFunctions {
 
             $modifiedAliquotsArray = [];
             foreach ($aliquotSublist as $aliquot) {
-                $modifiedAliquotsArray[$aliquot->id] = [AliquotStatusItems::STATUS => new APIQuestion(null, $aliquot->statusId),
+                $modifiedAliquotsArray[$aliquot->id] = [AliquotStatusItems::LOCATION => new APIQuestion(null, $aliquot->locationId),
+                        AliquotStatusItems::STATUS => new APIQuestion(null, $aliquot->statusId),
                         AliquotStatusItems::DAMAGE => new APIQuestion(null, $aliquot->conditionId)];
             }
             self::updateSamplesStatus($modifiedAliquotsArray, $sampleType, $statusForm);
@@ -534,7 +536,7 @@ class ServiceFunctions {
 
         $srcAliquotIds = []; // IDs of the aliquots processed
         $failedAliquotIds = []; // IDs of the aliquots that have been processed but the extraction of exosomes has failed
-        $exoPrefix = '_exo'; // Suffix to be added to the IDs of the aliquots used for exosomes
+        $exoSuffix = '_exo'; // Suffix to be added to the IDs of the aliquots used for exosomes
 
         $dbRows = [];
         foreach ($processedAliquotsArray as $row) {
@@ -550,25 +552,26 @@ class ServiceFunctions {
             $aliquotId = $row[AliquotTrackingItems::ID]->getValue();
             $srcAliquotIds[] = $aliquotId;
 
+            $processedAliquotCondition = null;
             if (trim($row[AliquotTrackingItems::EXOSOMES_SUCCESS]->getValue()) !== "0") {
                 /** @var APIQuestion[] $row */
-                // Aliquot IDs are suffixed with "_exo" to tack the original aliquot from which the exosome aliquot was extracted
-                $aliquotId .= $exoPrefix;
+                // Aliquot IDs are suffixed with "_exo" to track the original aliquot from which the exosome aliquot was extracted
+                $exosomeId = $aliquotId . $exoSuffix;
 
                 $dbColumns = [];
-                $dbColumns['ID_ALIQUOT'] = $aliquotId;
+                $dbColumns['ID_ALIQUOT'] = $exosomeId;
                 $dbColumns['ID_PATIENT'] = $patientId;
                 $dbColumns['PATIENT_REF'] = $patientRef;
                 $dbColumns['SAMPLE_TYPE'] = 'EXOSOMES';
                 $dbColumns['ID_LOCATION'] = $labTeamId;
                 $dbColumns['ID_STATUS'] = AliquotStatus::AVAILABLE;
                 $dbColumns['ID_TASK'] = $processingForm->getParentId();
-                $dbColumns['CREATED'] = $procDateUTC;
-                $dbColumns['UPDATED'] = $procDateUTC;
+                $dbColumns['ALIQUOT_CREATED'] = $procDateUTC;
+                $dbColumns['ALIQUOT_UPDATED'] = $procDateUTC;
 
                 //
                 $exosomesQuestionsArray[] = self::updateArrayTextQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix, AliquotStatusItems::ID,
-                        $aliquotId);
+                        $exosomeId);
                 $exosomesQuestionsArray[] = self::updateArrayTextQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix,
                         AliquotStatusItems::CREATION_DATE, DateHelper::datePart($procDateUTC));
                 $exosomesQuestionsArray[] = self::updateArrayTextQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix,
@@ -579,8 +582,19 @@ class ServiceFunctions {
                 $dbRows[] = $dbColumns;
             } else {
                 // Something went wrong during the extraction of the exosomes, so we will not create the exosomes aliquot
+                $processedAliquotCondition = AliquotDamage::EXOSOMES_FAILURE;
                 $failedAliquotIds[] = $aliquotId;
             }
+
+            // Update the processed aliquot to indicate that it has been used for exosomes
+            $dbColumns = [];
+            $dbColumns['ID_ALIQUOT'] = $aliquotId;
+            $dbColumns['ID_STATUS'] = AliquotStatus::USED;
+            if ($processedAliquotCondition) {
+                $dbColumns['ID_ALIQUOT_CONDITION'] = $processedAliquotCondition;
+            }
+            $dbColumns['ALIQUOT_UPDATED'] = $procDateUTC;
+            $dbRows[] = $dbColumns;
         }
 
         // Remove null entries
@@ -631,7 +645,7 @@ class ServiceFunctions {
             }
         }
 
-        self::trackAliquots($dbRows, $processingForm->getParentId());
+        self::trackAliquots($dbRows);
 
         // Concatenate the processed aliquot IDs into a string
         $strAliquotsProcessed = implode(',', $srcAliquotIds);
@@ -941,28 +955,26 @@ class ServiceFunctions {
      *
      * @param array $dbRows
      */
-    static public function trackAliquots($dbRows, $taskId = null, $shipmentId = null) {
-        /* If there existed a previous tracking records for the same TASK, all records will be deleted and added again */
-        $conditions = [];
+    static public function trackAliquots($dbRows) {
         $arrVariables = [];
-        if ($taskId) {
-            $conditions[] = "ID_TASK=:taskId";
-            $arrVariables[':taskId'] = $taskId;
-        } elseif ($shipmentId) {
-            $conditions[] = "ID_SHIPMENT=:shipmentId";
-            $arrVariables[':shipmentId'] = $shipmentId;
-        }
 
-        if (!empty($conditions)) {
-            $conditionSql = implode(' AND ', $conditions);
-            Database::getInstance()->ExecuteBindQuery("DELETE FROM ALIQUOTS_HISTORY WHERE $conditionSql", $arrVariables);
-        }
+        $dbColumnNames = ['ID_ALIQUOT', 'ID_PATIENT', 'PATIENT_REF', 'SAMPLE_TYPE', 'ID_LOCATION', 'ID_STATUS', 'ID_ALIQUOT_CONDITION', 'ID_TASK',
+                'ALIQUOT_CREATED', 'ALIQUOT_UPDATED', 'ID_SHIPMENT', 'RECORD_TIMESTAMP'];
 
+        $now = DateHelper::currentDate();
         foreach ($dbRows as $row) {
             $arrVariables = [];
+            $row['RECORD_TIMESTAMP'] = $now; // Add the current timestamp to track the real time when the DB record was created/modified
 
-            $dbColumnNames = ['ID_ALIQUOT', 'ID_PATIENT', 'PATIENT_REF', 'SAMPLE_TYPE', 'ID_LOCATION', 'ID_STATUS', 'ID_ALIQUOT_CONDITION', 'ID_TASK',
-                    'CREATED', 'UPDATED', 'ID_SHIPMENT'];
+            // Read the last known values of the aliquot to be updated
+            $sqlPrev = "SELECT * FROM ALIQUOTS WHERE ID_ALIQUOT=:id";
+            $rst = Database::getInstance()->ExecuteBindQuery($sqlPrev, $row['ID_ALIQUOT']);
+            $prevValues = [];
+            while ($rst->Next()) {
+                foreach ($rst->getColumnNames() as $colName) {
+                    $prevValues[$colName] = $rst->GetField($colName);
+                }
+            }
 
             $keyColumns = ['ID_ALIQUOT' => ':id_aliquot'];
 
@@ -970,7 +982,11 @@ class ServiceFunctions {
             foreach ($dbColumnNames as $colName) {
                 $parameterName = ':' . strtolower($colName);
                 if (array_key_exists($colName, $row)) {
+                    // New value provided for the column
                     $arrVariables[$parameterName] = $row[$colName];
+                } elseif (array_key_exists($colName, $prevValues)) {
+                    // If the column is not present in the row, we must keep the previous value
+                    $arrVariables[$parameterName] = $prevValues[$colName];
                 } else {
                     $arrVariables[$parameterName] = null;
                 }
@@ -985,8 +1001,8 @@ class ServiceFunctions {
             /*
              * Add the tracking of the aliquots in the ALIQUOTS_HISTORY table
              */
-            $sql = "INSERT INTO ALIQUOTS_HISTORY (ID_ALIQUOT, ID_TASK, ID_LOCATION, ID_STATUS, ID_ALIQUOT_CONDITION, UPDATED, ID_SHIPMENT) 
-                        VALUES (:id_aliquot, :id_task, :id_location, :id_status, :id_aliquot_condition, :updated, :id_shipment)";
+            $sql = "INSERT INTO ALIQUOTS_HISTORY (ID_ALIQUOT, ID_TASK, ID_LOCATION, ID_STATUS, ID_ALIQUOT_CONDITION, ALIQUOT_UPDATED, ID_SHIPMENT, RECORD_TIMESTAMP) 
+                        VALUES (:id_aliquot, :id_task, :id_location, :id_status, :id_aliquot_condition, :aliquot_updated, :id_shipment, :record_timestamp)";
             Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
         }
     }
@@ -994,7 +1010,7 @@ class ServiceFunctions {
     static private function addLocation($locationId) {
         $api = LinkcareSoapAPI::getInstance();
 
-        $sql = "SELECT ID,NAME FROM LOCATIONS WHERE ID=:id";
+        $sql = "SELECT ID_LOCATION,NAME FROM LOCATIONS WHERE ID_LOCATION=:id";
         $rst = Database::getInstance()->ExecuteBindQuery($sql, [':id' => $locationId]);
         if ($rst->Next()) {
             return;

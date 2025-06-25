@@ -124,6 +124,13 @@ function shipment_update($parameters) {
     $api = LinkcareSoapAPI::getInstance();
     $timezone = $api->getSession()->getTimezone();
 
+    if ($shipment->statusId == ShipmentStatus::PREPARING) {
+        preserveProperties($parameters, ['id', 'ref', 'sentFromId', 'sentToId']);
+    } elseif ($shipment->statusId == ShipmentStatus::RECEIVING) {
+        preserveProperties($parameters, ['id', 'receiverId', 'receptionDate', 'receptionStatusId', 'receptionComments']);
+    } else {
+        throw new ServiceException(ErrorCodes::INVALID_STATUS, "Shipment with ID $id cannot be updated because it is not in a status that allows updates");
+    }
     // Copy the parameters received tracking the modified ones
     $shipment->trackedCopy($parameters, $timezone);
     $shipment->updateModified();
@@ -191,7 +198,7 @@ function shipment_send($parameters) {
     }
 
     $shipment->updateModified($shipment);
-    ServiceFunctions::trackAliquots($aliquotList, null, $shipmentId);
+    ServiceFunctions::trackAliquots($aliquotList);
 
     return new ServiceResponse($shipment->d, null);
 }
@@ -321,7 +328,7 @@ function shipment_delete($parameters) {
     $shipment = Shipment::fromDBRecord($rst);
 
     if ($shipment->statusId != ShipmentStatus::PREPARING) {
-        throw new ServiceException(ErrorCodes::INVALID_STATE, "Shipment with ID: $shipmentId can't be deleted because it is not in 'Preparing' status");
+        throw new ServiceException(ErrorCodes::INVALID_STATUS, "Shipment with ID: $shipmentId can't be deleted because it is not in 'Preparing' status");
     }
 
     $arrVariables = [':id' => $shipmentId, ':aliquotStatus' => AliquotStatus::AVAILABLE];
@@ -467,8 +474,8 @@ function find_aliquot($parameters) {
     $aliquot->location = $rst->GetField('LOCATION_NAME');
     $aliquot->statusId = $rst->GetField('ID_STATUS');
     $aliquot->status = AliquotStatus::getName($rst->GetField('ID_STATUS'));
-    $aliquot->created = $rst->GetField('CREATED');
-    $aliquot->lastUpdate = $rst->GetField('UPDATED');
+    $aliquot->created = $rst->GetField('ALIQUOT_CREATED');
+    $aliquot->lastUpdate = $rst->GetField('ALIQUOT_UPDATED');
 
     return new ServiceResponse($aliquot, null);
 }

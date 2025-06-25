@@ -164,11 +164,20 @@ function add_exosomes($parameters) {
     $patientId = loadParam($parameters, 'patient');
     $patientRef = loadParam($parameters, 'patient_ref');
 
+    if (!$bloodProcessingFormId) {
+        throw new ServiceException(ErrorCodes::DATA_MISSING, "The ID of the Blood Processing Form is missing");
+    }
     if (!$labTeamId) {
         throw new ServiceException(ErrorCodes::DATA_MISSING, "The ID of the laboratory Team is missing");
     }
     if (!$procDatetime) {
         throw new ServiceException(ErrorCodes::DATA_MISSING, "The processing datetime of the blood samples is missing");
+    }
+    if (!$patientId) {
+        throw new ServiceException(ErrorCodes::DATA_MISSING, "The ID of the patient is missing");
+    }
+    if (!$patientRef) {
+        throw new ServiceException(ErrorCodes::DATA_MISSING, "The reference of the patient is missing");
     }
 
     return ServiceFunctions::addExosomeAliquots($patientId, $patientRef, $bloodProcessingFormId, $labTeamId, $procDatetime);

@@ -58,8 +58,9 @@ class DbDataModels {
         $columns[] = new DbColumnDefinition('ID_ALIQUOT_CONDITION', DbDataTypes::VARCHAR, 64);
         $columns[] = new DbColumnDefinition('ID_TASK', DbDataTypes::BIGINT, 32, null, false);
         $columns[] = new DbColumnDefinition('ID_SHIPMENT', DbDataTypes::BIGINT);
-        $columns[] = new DbColumnDefinition('CREATED', DbDataTypes::DATETIME, null, null, false);
-        $columns[] = new DbColumnDefinition('UPDATED', DbDataTypes::DATETIME, null, null, false);
+        $columns[] = new DbColumnDefinition('ALIQUOT_CREATED', DbDataTypes::DATETIME, null, null, false);
+        $columns[] = new DbColumnDefinition('ALIQUOT_UPDATED', DbDataTypes::DATETIME, null, null, false);
+        $columns[] = new DbColumnDefinition('RECORD_TIMESTAMP', DbDataTypes::DATETIME, null, null, false);
         $indexes[] = new DbIndexDefinition('PATIENT_ID_IDX', ['ID_PATIENT']);
         $indexes[] = new DbIndexDefinition('SAMPLE_TYPE_IDX', ['SAMPLE_TYPE']);
         $indexes[] = new DbIndexDefinition('LOCATION_ID_IDX', ['ID_LOCATION']);
@@ -75,8 +76,9 @@ class DbDataModels {
         $columns[] = new DbColumnDefinition('ID_LOCATION', DbDataTypes::VARCHAR, 32, null, false);
         $columns[] = new DbColumnDefinition('ID_STATUS', DbDataTypes::VARCHAR, 32, null, false);
         $columns[] = new DbColumnDefinition('ID_ALIQUOT_CONDITION', DbDataTypes::VARCHAR, 64);
-        $columns[] = new DbColumnDefinition('UPDATED', DbDataTypes::DATETIME, null, null, false);
+        $columns[] = new DbColumnDefinition('ALIQUOT_UPDATED', DbDataTypes::DATETIME, null, null, false);
         $columns[] = new DbColumnDefinition('ID_SHIPMENT', DbDataTypes::BIGINT);
+        $columns[] = new DbColumnDefinition('RECORD_TIMESTAMP', DbDataTypes::DATETIME, null, null, false);
         $indexes[] = new DbIndexDefinition('ALIQUOT_ID_HISTORY_IDX', ['ID_ALIQUOT']);
         $tables[] = new DbTableDefinition('ALIQUOTS_HISTORY', $columns, 'ID_HISTORY', $indexes, true);
 

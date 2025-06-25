@@ -67,7 +67,6 @@ class Shipment {
         $shipment->id = $rst->GetField('ID_SHIPMENT');
         $shipment->ref = $rst->GetField('SHIPMENT_REF');
         $shipment->statusId = $rst->GetField('ID_STATUS');
-        $shipment->status = ShipmentStatus::getName($shipment->statusId);
         $shipment->sentFromId = $rst->GetField('ID_SENT_FROM');
         $shipment->sentFrom = $rst->GetField('SENT_FROM');
         $shipment->sentToId = $rst->GetField('ID_SENT_TO');
@@ -90,7 +89,6 @@ class Shipment {
         $json->id = $this->id;
         $json->ref = $this->ref;
         $json->statusId = $this->statusId;
-        $json->status = ShipmentStatus::getName($this->statusId);
         $json->sentFromId = $this->sentFromId;
         $json->sentFrom = $this->sentFrom;
         $json->sentToId = $this->sentToId;

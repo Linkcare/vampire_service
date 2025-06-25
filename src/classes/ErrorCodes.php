@@ -39,4 +39,7 @@ abstract class ErrorCodes extends BasicEnum {
 
     /** @var string The action requested is not supported */
     const UNSUPPORTED_ACTION = 'UNSUPPORTED_ACTION';
+
+    /** @var string An object is in an invalid status and an operation can't be performed */
+    const INVALID_STATUS = 'INVALID_STATUS';
 }
