@@ -1,44 +1,8 @@
 <?php
 
 class APIQuestion {
-    const TYPE_NUMERICAL = 'NUMERICAL';
-    const TYPE_BOOLEAN = 'BOOLEAN';
-    const TYPE_TEXT = 'TEXT';
-    const TYPE_TEXT_AREA = 'TEXT_AREA';
-    const TYPE_STATIC_TEXT = 'STATIC_TEXT';
-    const TYPE_SELECT = 'SELECT';
-    const TYPE_DATE = 'DATE';
-    const TYPE_TIME = 'TIME';
-    const TYPE_HORIZONTAL_CHECK = 'HORIZONTAL_CHECK';
-    const TYPE_VERTICAL_CHECK = 'VERTICAL_CHECK';
-    const TYPE_VERTICAL_RADIO = 'VERTICAL_RADIO';
-    const TYPE_HORIZONTAL_RADIO = 'HORIZONTAL_RADIO';
-    const TYPE_FORM = 'FORM';
-    const TYPE_CODE = 'CODE';
-    const TYPE_GRAPH = 'GRAPH';
-    const TYPE_FILE = 'FILE';
-    const TYPE_ACTION = 'ACTION';
-    const TYPE_LINK = 'LINK';
-    const TYPE_EDITABLE_STATIC_TEXT = 'TEXT_AREA';
-    const TYPE_HTML = 'HTML';
-    const TYPE_JSON = 'JSON';
-    const TYPE_DEVICE = 'DEVICE';
-    const TYPE_AGE = 'AGE';
-    const TYPE_SLIDER = 'VAS';
-    const TYPE_MULTIMEDIA = 'MULTIMEDIA';
-    const TYPE_GEOLOCATION = 'GEOLOCATION';
-    const TYPE_CASE_DATA = 'CASE_DATA';
-    const TYPE_COUNTDOWN = 'COUNTDOWN';
-    const TYPE_QR = 'QR';
-    const TYPE_EVALUATION = 'EVALUATION';
-    const TYPE_TRAINER = 'TRAINER';
-    const TYPE_PHONE = 'PHONE';
-    const TYPE_EMAIL = 'EMAIL';
-    const TYPE_ASSOCIATE = 'ASSOCIATE';
-    const TYPE_ARRAY = 'ARRAY';
-    const TYPE_SIGNATURE = 'SIGNATURE';
-    const OPTIONS_TYPES = [self::TYPE_BOOLEAN, self::TYPE_SELECT, self::TYPE_HORIZONTAL_CHECK, self::TYPE_VERTICAL_CHECK, self::TYPE_VERTICAL_RADIO,
-            self::TYPE_HORIZONTAL_RADIO];
+    const OPTIONS_TYPES = [APIQuestionTypes::BOOLEAN, APIQuestionTypes::SELECT, APIQuestionTypes::HORIZONTAL_CHECK, APIQuestionTypes::VERTICAL_CHECK,
+            APIQuestionTypes::VERTICAL_RADIO, APIQuestionTypes::HORIZONTAL_RADIO];
 
     // Private members
     private $id;
@@ -68,12 +32,13 @@ class APIQuestion {
     private $modified = true;
     private $api;
 
-    public function __construct($itemCode = null, $value = null, $optionId = null) {
+    public function __construct($itemCode = null, $value = null, $optionId = null, $type = null) {
         $this->api = LinkcareSoapAPI::getInstance();
 
         $this->itemCode = $itemCode;
         $this->value = $value;
         $this->optionId = $optionId;
+        $this->type = $type;
     }
 
     /**
@@ -487,24 +452,26 @@ class APIQuestion {
             $parentNode = $xml->rootNode;
         }
 
+        $id = $this->getId() ?? $this->getItemCode();
+
         if ($plain) {
-            $xml->createChildNode($parentNode, "question_id", $this->getId());
+            $xml->createChildNode($parentNode, "question_id", $id);
         } else {
             if ($this->getRow()) {
                 // Is a question in an array
-                $id = $this->getItemCode() ? $this->getItemCode() : $this->getQuestionTemplateId();
+                $arrayColumnId = $this->getItemCode() ? $this->getItemCode() : $this->getQuestionTemplateId();
 
-                $xml->createChildNode($parentNode, "question_id", $id);
+                $xml->createChildNode($parentNode, "question_id", $arrayColumnId);
                 $xml->createChildNode($parentNode, "column", $this->getColumn());
             } else {
-                $xml->createChildNode($parentNode, "question_id", $this->getId());
+                $xml->createChildNode($parentNode, "question_id", $id);
             }
         }
 
         if (in_array($this->getType(), self::OPTIONS_TYPES)) {
             $xml->createChildNode($parentNode, "value", $this->getOptionValue());
             $xml->createChildNode($parentNode, "option_id", $this->getOptionId());
-        } elseif ($this->getType() == self::TYPE_CODE) {
+        } elseif ($this->getType() == APIQuestionTypes::CODE) {
             $valObj = new stdClass();
             $valObj->code = $this->getValue();
             $xml->createChildNode($parentNode, "value", json_encode($valObj));

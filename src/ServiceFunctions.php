@@ -429,7 +429,7 @@ class ServiceFunctions {
         self::updateTextQuestionValue($selectionForm, 'NUM_AVAILABLE_ALIQUOTS', count($availableAliquotsArray));
 
         if (!empty($availableAliquotsArray)) {
-            if (($arrayHeader = $selectionForm->findQuestion(AliquotTrackingItems::ARRAY)) && $arrayHeader->getType() == APIQuestion::TYPE_ARRAY) {
+            if (($arrayHeader = $selectionForm->findQuestion(AliquotTrackingItems::ARRAY)) && $arrayHeader->getType() == APIQuestionTypes::ARRAY) {
                 foreach ($availableAliquotsArray as $row) {
                     $aliquotIds[] = $row[AliquotStatusItems::ID]->getValue();
                     $arrQuestions[] = self::updateArrayTextQuestionValue($selectionForm, $arrayHeader->getId(), $ix, AliquotTrackingItems::ID,
@@ -915,7 +915,7 @@ class ServiceFunctions {
             }
         }
 
-        $updatedQuestions[] = self::updateOptionQuestionValue($bpForm, 'FORM_COMPLETE', 1);
+        $updatedQuestions[] = self::updateOptionQuestionValue($bpForm, 'FORM_COMPLETE', 1, null, true, APIQuestionTypes::VERTICAL_RADIO);
 
         $api->form_set_all_answers($bpForm->getId(), $updatedQuestions, true);
         $bpForm->refresh();
@@ -964,11 +964,16 @@ class ServiceFunctions {
      * @param APIForm $form Form containing the question to be modified
      * @param string $itemCode ITEM CODE of the question that must be modified
      * @param string $value Value to assign to the question
+     * @param bool $create If true, the question will be created if it does not exist (maybe it is a conditioned question that currently doesn't
+     *        appear in the summary of the form)
+     * @param string $questionType Type of the question to be modified (optional. Only necessary if the question is going to be created)
      * @return APIQuestion
      */
-    static private function updateTextQuestionValue($form, $itemCode, $value) {
+    static private function updateTextQuestionValue($form, $itemCode, $value, $create = false, $questionType = null) {
         if ($q = $form->findQuestion($itemCode)) {
             $q->setAnswer($value);
+        } elseif ($create) {
+            $q = new APIQuestion($itemCode, $value, null, $questionType);
         } else {
             throw new ServiceException(ErrorCodes::DATA_MISSING, "Error updating form " . $form->getFormCode() . ". Item '$itemCode' not found");
         }
@@ -1004,14 +1009,19 @@ class ServiceFunctions {
      * @param string $itemCode ITEM CODE of the question that must be modified
      * @param string|string[] $optionId Id/s of the options assigned as the answer to the question
      * @param string|string[] $optionValues Value/s of the options assigned as the answer to the question
+     * @param bool $create If true, the question will be created if it does not exist (maybe it is a conditioned question that currently doesn't
+     *        appear in the summary of the form)
+     * @param string $questionType Type of the question to be modified (optional. Only necessary if the question is going to be created)
      * @return APIQuestion
      */
-    static private function updateOptionQuestionValue($form, $itemCode, $optionId, $optionValues = null) {
+    static private function updateOptionQuestionValue($form, $itemCode, $optionId, $optionValues = null, $create = false, $questionType = null) {
         $ids = is_array($optionId) ? implode('|', $optionId) : $optionId;
         $values = is_array($optionValues) ? implode('|', $optionValues) : $optionValues;
 
         if ($q = $form->findQuestion($itemCode)) {
             $q->setOptionAnswer($ids, $values);
+        } elseif ($create) {
+            $q = new APIQuestion($itemCode, $values, $ids, $questionType);
         } else {
             throw new ServiceException(ErrorCodes::DATA_MISSING, "Error updating form " . $form->getFormCode() . ". Item '$itemCode' not found");
         }
