@@ -3,6 +3,7 @@
 class ServiceLogger {
     const LEVEL_DEBUG = 'debug';
     const LEVEL_TRACE = 'trace';
+    const LEVEL_INFO = 'info';
     const LEVEL_WARNING = 'warning';
     const LEVEL_ERROR = 'error';
     const LEVEL_NONE = 'none';
@@ -14,6 +15,7 @@ class ServiceLogger {
     private $asHTML = false;
     private $toSTDOUT = false;
     private $addStackInfo = false;
+    private $customLogFile = null;
 
     private function __construct($logLevel = null, $logDir = null) {
         if (!$logLevel) {
@@ -45,6 +47,7 @@ class ServiceLogger {
                 }
             }
         }
+
         $this->logDir = $logDir;
     }
 
@@ -65,10 +68,14 @@ class ServiceLogger {
      */
     static public function getInstance() {
         if (!self::$instance) {
-            self::$instance = new ServiceLogger();
+            self::$instance = new ServiceLogger(self::LEVEL_ERROR);
         }
 
         return self::$instance;
+    }
+
+    public function setCustomLogFile($filePath) {
+        $this->customLogFile = $filePath;
     }
 
     /**
@@ -113,7 +120,7 @@ class ServiceLogger {
     }
 
     /**
-     * Generate a trace of DEBUG level
+     * Generate a trace of TRACE level
      *
      * @param string $log
      * @param int $tabulation
@@ -127,7 +134,21 @@ class ServiceLogger {
     }
 
     /**
-     * Generate a trace of TRACE level
+     * Generate a trace of INFO level
+     *
+     * @param string $log
+     * @param int $tabulation
+     */
+    public function info($log, $tabulation = 0) {
+        if ($this->logLevel > self::getLevelOrder(self::LEVEL_INFO)) {
+            return;
+        }
+
+        $this->log(self::LEVEL_INFO, $log, $tabulation);
+    }
+
+    /**
+     * Generate a trace of WARNING level
      *
      * @param string $log
      * @param int $tabulation
@@ -141,7 +162,7 @@ class ServiceLogger {
     }
 
     /**
-     * Generate a trace of WARNING level
+     * Generate a trace of ERROR level
      *
      * @param string $log
      * @param int $tabulation
@@ -154,22 +175,18 @@ class ServiceLogger {
         $this->log(self::LEVEL_ERROR, $log, $tabulation);
     }
 
-    /**
-     * Generate a trace of ERROR level
-     *
-     * @param string $log
-     * @param int $tabulation
-     */
     static private function getLevelOrder($logLevel) {
         switch ($logLevel) {
             case self::LEVEL_DEBUG :
                 return 1;
             case self::LEVEL_TRACE :
                 return 2;
-            case self::LEVEL_WARNING :
+            case self::LEVEL_INFO :
                 return 3;
-            case self::LEVEL_ERROR :
+            case self::LEVEL_WARNING :
                 return 4;
+            case self::LEVEL_ERROR :
+                return 5;
             case self::LEVEL_NONE :
             default :
                 return 1000;
@@ -217,6 +234,11 @@ class ServiceLogger {
 
         if ($this->logDir) {
             file_put_contents($this->logDir . $date . '.log', $logMsg . "\n", FILE_APPEND);
+        }
+        if ($this->customLogFile) {
+            if (file_put_contents($this->customLogFile, $logMsg . "\n", FILE_APPEND) === false) {
+                error_log('Service logger error: cannot write to custom log file ' . $this->customLogFile);
+            }
         }
 
         $lineBreak = "\n";

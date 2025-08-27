@@ -101,4 +101,24 @@ class Aliquot {
 
         return $json;
     }
+
+    /**
+     * Find the requested aliquots given a list of aliquot IDs
+     *
+     * @param string $patientId
+     * @param string[] $aliquotIds
+     * @return Aliquot[]
+     */
+    public function findAliquots($aliquotIds) {
+        $aliquots = [];
+        $arrVariables = [];
+        $condition = DbHelper::bindParamArray('alId', $aliquotIds, $arrVariables);
+        $sql = "SELECT * FROM ALIQUOTS WHERE ID_ALIQUOT IN ($condition)";
+        $rst = Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
+        while ($rst->Next()) {
+            $aliquots[] = Aliquot::fromDBRecord($rst);
+        }
+
+        return $aliquots;
+    }
 }

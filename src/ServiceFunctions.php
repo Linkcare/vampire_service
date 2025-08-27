@@ -127,7 +127,7 @@ class ServiceFunctions {
      * @throws ServiceException|APIException
      * @return APIAdmission
      */
-    function findAdmission($patientId) {
+    static function findAdmission($patientId) {
         $api = LinkcareSoapAPI::getInstance();
 
         $patientAdmissions = $api->case_admission_list($patientId);
@@ -829,6 +829,99 @@ class ServiceFunctions {
         }
 
         return $aliquotsArray;
+    }
+
+    /**
+     * Find the "BLOOD PROCESSING" TASK where the blood sample ID is the one specified
+     * Returns NULL if the FORM is up to date (the aliquots have already been registered)
+     *
+     * @throws ServiceException If the FORM with the specified blood sample ID cannot be found or if there is any error
+     * @param string $bloodSampleId
+     * @return [APICase, APIForm]
+     */
+    static public function findFormFromBloodSampleId($bloodSampleId) {
+        $api = LinkcareSoapAPI::getInstance();
+
+        // Step 1: Find patients of the program that have the specified blood sample ID
+        $filter = ['program' => $GLOBALS['PROJECT_CODE'], 'datacode' => ['name' => 'SAMPLE_ID', 'value' => $bloodSampleId]];
+        $patients = $api->case_search(json_encode($filter));
+
+        if (empty($patients)) {
+            throw new ServiceException(ErrorCodes::NOT_FOUND, "No CQS patient found with blood sample ID $bloodSampleId");
+        } else if (count($patients) > 1) {
+            $ids = array_map(function ($p) {
+                /** @var APICase $p */
+                return $p->getId();
+            }, $patients);
+            throw new ServiceException(ErrorCodes::UNEXPECTED_ERROR, "More than one CQS patient found with blood sample ID $bloodSampleId: Patient IDs: " .
+                    implode(',', $ids));
+        }
+
+        /** @var APICase $patient */
+        $patient = $patients[0];
+        // Step 2: Find the ADMISSION of the patient
+        $admission = self::findAdmission($patient->getId());
+        if (!$admission) {
+            throw new ServiceException(ErrorCodes::NOT_FOUND, "No CQS patient found with blood sample ID $bloodSampleId");
+        }
+
+        // Step 3: Find the BLOOD PROCESSING task of the admission
+        $filter = new TaskFilter();
+        $filter->setTaskCodes('PROC_BLOOD_SAMPLE');
+        $filter->setAdmissionIds($admission->getId());
+        $tasks = $patient->getTaskList(2, 0, $filter);
+        foreach ($tasks as $task) {
+            $bpForm = null;
+            foreach ($task->getForms() as $form) {
+                if ($form->getFormCode() != 'BLOOD_PROCESSING') {
+                    continue;
+                }
+                $bloodSampleQuestion = $form->findQuestion('SAMPLE_ID');
+                if (!$bloodSampleQuestion || $bloodSampleQuestion->getValue() != $bloodSampleId) {
+                    continue;
+                }
+                $bpForm = $form;
+                break;
+            }
+        }
+        if (!$bpForm) {
+            throw new ServiceException(ErrorCodes::NOT_FOUND, "No BLOOD PROCESSING task found with blood sample ID $bloodSampleId");
+        }
+
+        return [$patient, $bpForm];
+    }
+
+    /**
+     *
+     * @param APIForm $bpForm
+     * @param array $aliquotsData
+     */
+    static public function updateBloodProcessingData($bpForm, $aliquotsData) {
+        $api = LinkcareSoapAPI::getInstance();
+
+        // Fill the aliquot arrays of the TASK with the IDs of the aliquots provided
+        $sampleTypesList = ['WHOLE_BLOOD', 'PLASMA', 'PBMC', 'SERUM'];
+        $updatedQuestions = [];
+        foreach ($sampleTypesList as $sampleType) {
+            $numAliquotsQuestion = $bpForm->findQuestion('NUM_' . $sampleType . '_ALIQUOTS');
+
+            $arrayRef = $sampleType . '_ARRAY';
+
+            $updatedQuestions[] = self::updateTextQuestionValue($bpForm, $numAliquotsQuestion->getItemCode(), count($aliquotsData[$sampleType]));
+            $ixRow = 1;
+            foreach ($aliquotsData[$sampleType] as $aliquotId) {
+                $itemCode = $sampleType . '_ALIQUOT_ID';
+                $updatedQuestions[] = self::updateArrayTextQuestionValue($bpForm, $arrayRef, $ixRow++, $itemCode, $aliquotId);
+            }
+        }
+
+        $updatedQuestions[] = self::updateOptionQuestionValue($bpForm, 'FORM_COMPLETE', 1);
+
+        $api->form_set_all_answers($bpForm->getId(), $updatedQuestions, true);
+        $bpForm->refresh();
+        if ($bpForm->getStatus() != APIForm::STATUS_CLOSED) {
+            throw new ServiceException(ErrorCodes::UNEXPECTED_ERROR, "Form updated successfully but its status is not CLOSED");
+        }
     }
 
     /**

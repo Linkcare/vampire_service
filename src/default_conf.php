@@ -18,6 +18,8 @@ $GLOBALS['LAB_TEAMS'] = ['SYNLAB' => ['is_lab' => 1, 'is_clinical_site' => 0], '
         'CQS' => ['is_lab' => 0, 'is_clinical_site' => 1], 'IPIN' => ['is_lab' => 0, 'is_clinical_site' => 1],
         'AUTH' => ['is_lab' => 0, 'is_clinical_site' => 0]];
 
+$GLOBALS['CQS_IMPORT_DIR'] = '/var/www/html/services/cqs_import';
+
 /**
  * ** OPTIONAL CONFIGURATION PARAMETERS ***
  */
