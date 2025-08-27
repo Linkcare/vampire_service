@@ -255,6 +255,8 @@ function import_CQS_blood_processing_data($parameters) {
 
     foreach ($cqsData as $bloodSampleRef => $aliquotsData) {
         try {
+            $patient = null;
+            $bpForm = null;
             $aliquotIds = [];
             foreach ($aliquotsData as $type => $ids) {
                 $aliquotIds = array_merge($aliquotIds, $ids);
@@ -279,7 +281,8 @@ function import_CQS_blood_processing_data($parameters) {
             $numSuccessful++;
         } catch (Exception $e) {
             $executionResult = BackgroundServiceResponse::ERROR;
-            $msg = "Sample $bloodSampleRef (" . $patient->getNickname() . "): ERROR " . $e->getMessage();
+            $patientRef = $patient ? $patient->getNickname() : 'unknown patient';
+            $msg = "Sample $bloodSampleRef ($patientRef): ERROR " . $e->getMessage();
             $serviceResponse->addDetails($msg);
             ServiceLogger::getInstance()->error($msg);
             $numErrors++;
