@@ -36,7 +36,7 @@ header('Content-type: application/json');
 $function = $_GET['function'];
 $logger = ServiceLogger::init($GLOBALS['LOG_LEVEL'], $GLOBALS['LOG_DIR']);
 
-$publicFunctions = ['track_pending_shipments', 'track_pending_receptions', 'import_CQS_blood_processing_data'];
+$publicFunctions = ['track_pending_shipments', 'track_pending_receptions', 'import_blood_processing_data'];
 
 if (in_array($function, $publicFunctions)) {
     $json = file_get_contents('php://input');
@@ -219,81 +219,121 @@ function track_pending_receptions($parameters) {
 }
 
 /**
- * Imports the blood processing data of the patients from an Excel file provided by CQS and placed in the cqs_data directory.
+ * Imports the blood processing data of the patients from an Excel file provided by the clinical sites and placed in the corresponding data directory.
  *
  * @param stdClass $parameters
  * @return BackgroundServiceResponse
  */
-function import_CQS_blood_processing_data($parameters) {
+function import_blood_processing_data($parameters) {
     $serviceResponse = new BackgroundServiceResponse(BackgroundServiceResponse::IDLE, "");
-
-    $cqsFiles = glob($GLOBALS['CQS_IMPORT_DIR'] . '/*.xlsx');
-    if (empty($cqsFiles)) {
-        return new BackgroundServiceResponse(BackgroundServiceResponse::IDLE, "No CQS data files (*.xlsx) pending to import.");
-    }
-
-    $executionResult = BackgroundServiceResponse::SUCCESS;
-
-    $filePath = $cqsFiles[0]; // Get the first file found;
-    $processFile = $filePath . '.processing';
-    $logFile = $filePath . '.log';
-    ServiceLogger::getInstance()->setCustomLogFile($logFile);
-
-    if (file_exists($processFile) && !unlink($processFile)) {
-        return new BackgroundServiceResponse(BackgroundServiceResponse::IDLE, "Error deleting previous file: $processFile. Verify the the directory is writable.");
-    }
-
-    if (!rename($filePath, $processFile)) {
-        return new BackgroundServiceResponse(BackgroundServiceResponse::IDLE, "Error renaming $filePath to $processFile. Verify the the directory is writable.");
-    }
-
-    $cqsData = loadCQSBloodProcessingData($processFile);
-
     $numErrors = 0;
     $numSuccessful = 0;
     $numSkipped = 0;
+    $executionResult = BackgroundServiceResponse::SUCCESS;
 
-    foreach ($cqsData as $bloodSampleRef => $aliquotsData) {
-        try {
-            $patient = null;
-            $bpForm = null;
-            $aliquotIds = [];
-            foreach ($aliquotsData as $type => $ids) {
-                $aliquotIds = array_merge($aliquotIds, $ids);
-            }
-            if (count($aliquotIds) == count(Aliquot::findAliquots($aliquotIds))) {
-                // All aliquots already exist. No need to import
-                $msg = "Sample $bloodSampleRef already loaded. Data skipped.";
+    $teamsToImport = ['CQS', 'IPIN'];
+    foreach ($teamsToImport as $teamCode) {
+        $importDir = null;
+        $loadFunction = null;
+        switch ($teamCode) {
+            case 'CQS' :
+                $importDir = $GLOBALS['CQS_IMPORT_DIR'];
+                $loadFunction = 'loadCQSBloodProcessingData';
+                break;
+            case 'IPIN' :
+                $importDir = $GLOBALS['IPIN_IMPORT_DIR'];
+                $loadFunction = 'loadIPINBloodProcessingData';
+                break;
+            default :
+                $msg = "Unknown team code: $teamCode. No data will be imported.";
+                ServiceLogger::getInstance()->error($msg);
                 $serviceResponse->addDetails($msg);
-                ServiceLogger::getInstance()->info($msg);
-                $numSkipped++;
-                continue;
-            }
-
-            /** @var APICase $patient */
-            list($patient, $bpForm) = ServiceFunctions::findFormFromBloodSampleId($bloodSampleRef);
-
-            ServiceFunctions::updateBloodProcessingData($bpForm, $aliquotsData);
-
-            $msg = "Sample $bloodSampleRef (" . $patient->getNickname() . "): Imported successfully.";
-            $serviceResponse->addDetails($msg);
-            ServiceLogger::getInstance()->info($msg);
-            $numSuccessful++;
-        } catch (Exception $e) {
-            $executionResult = BackgroundServiceResponse::ERROR;
-            $patientRef = $patient ? $patient->getNickname() : 'unknown patient';
-            $msg = "Sample $bloodSampleRef ($patientRef): ERROR " . $e->getMessage();
-            $serviceResponse->addDetails($msg);
-            ServiceLogger::getInstance()->error($msg);
-            $numErrors++;
+                $executionResult = BackgroundServiceResponse::ERROR;
+                break;
+        }
+        if (!$importDir || !$loadFunction) {
+            continue;
         }
 
-        echo " "; // Send space to the output buffer to avoid timeouts, because the processing of all patients can take a long time
-        flush();
+        $filesToImport = glob($importDir . '/*.xlsx');
+        if (empty($filesToImport)) {
+            $msg = "$teamCode: No Blood Processing data files (*.xlsx) pending to import.";
+            $serviceResponse->addDetails($msg);
+            ServiceLogger::getInstance()->info($msg);
+            continue;
+        }
+
+        $filePath = $filesToImport[0]; // Process only one file of each team at a time
+        $serviceResponse->addDetails("$teamCode: Importing blood processing from file " . basename($filePath));
+        $processFile = $filePath . '.processing';
+        $logFile = $filePath . '.log';
+        ServiceLogger::getInstance()->setCustomLogFile($logFile);
+
+        if (file_exists($processFile) && !unlink($processFile)) {
+            $msg = "$teamCode: Error deleting previous file: $processFile. Verify the the directory is writable.";
+            $serviceResponse->addDetails($msg);
+            ServiceLogger::getInstance()->error($msg);
+            $executionResult = BackgroundServiceResponse::ERROR;
+            continue;
+        }
+
+        if (!rename($filePath, $processFile)) {
+            $msg = "$teamCode: Error renaming $filePath to $processFile. Verify the the directory is writable.";
+            $serviceResponse->addDetails($msg);
+            ServiceLogger::getInstance()->error($msg);
+            $executionResult = BackgroundServiceResponse::ERROR;
+            continue;
+        }
+
+        $importedData = $loadFunction($processFile, $teamCode);
+
+        foreach ($importedData as $patientSamples) {
+            try {
+                $patient = $patientSamples['patient'];
+                $bpForm = $patientSamples['form'];
+                $displayName = $patientSamples['displayName'];
+                if ($loadError = $patientSamples['error']) {
+                    throw new Exception($loadError);
+                }
+
+                if (!$patient || !$bpForm) {
+                    continue;
+                }
+
+                $aliquotIds = [];
+                foreach (array_values($patientSamples['samples']) as $ids) {
+                    $aliquotIds = array_merge($aliquotIds, $ids);
+                }
+                if (count($aliquotIds) == count(Aliquot::findAliquots($aliquotIds))) {
+                    // All aliquots already exist. No need to import
+                    $msg = "Aliquots of sample $displayName already loaded. Data skipped.";
+                    $serviceResponse->addDetails($msg);
+                    ServiceLogger::getInstance()->info($msg);
+                    $numSkipped++;
+                    continue;
+                }
+
+                ServiceFunctions::updateBloodProcessingData($bpForm, $patientSamples['samples']);
+
+                $msg = "Sample $displayName: Imported successfully.";
+                $serviceResponse->addDetails($msg);
+                ServiceLogger::getInstance()->info($msg);
+                $numSuccessful++;
+            } catch (Exception $e) {
+                $executionResult = BackgroundServiceResponse::ERROR;
+                $msg = "Sample $displayName: ERROR " . $e->getMessage();
+                $serviceResponse->addDetails($msg);
+                ServiceLogger::getInstance()->error($msg);
+                $numErrors++;
+            }
+
+            echo " "; // Send space to the output buffer to avoid timeouts, because the processing of all patients can take a long time
+            flush();
+        }
     }
 
-    $msg = "CQS blood processing data finished. Errors: $numErrors, Successful: $numSuccessful, Skipped: $numSkipped, Total samples processed: " .
-            count($cqsData);
+    $msg = "Blood processing data import process finished. Errors: $numErrors, Successful: $numSuccessful, Skipped: $numSkipped, Total samples processed: " .
+            count($importedData);
     $serviceResponse->setMessage($msg);
     $serviceResponse->setCode($executionResult);
 
@@ -310,37 +350,55 @@ function import_CQS_blood_processing_data($parameters) {
 /* ******* Internal funcions ************************************************** */
 /**
  * Loads the data provided by CQS about the blood processig of the patients from an Excel file.
- * The returned value is a 3-dimensional array indexed by patient reference and aliquot type.
+ * The returned value is a multi dimensional array indexed by patient reference and aliquot type.
  * The contents of each item is an array with the IDs of the aliquots of that type for that patient.
  * Example:
- * ['PAT001' => ['whole_blood' => [aliquot_id1, aliquot_id2, ...], ]]
+ * ['PAT001' => [
+ * ···'patient' => APIPatient,
+ * ···'form' => APIForm (blood processing form),
+ * ···'samples' => [
+ * ·····'whole_blood' => [aliquot_id1, aliquot_id2, ...],
+ * ·····'plasma' => [aliquot_id3, aliquot_id4, ...],
+ * ···]
+ * ··]
+ * ]
  *
  * @param string $processFile
+ * @param string $teamCode Code of the team owner of the Subscription
  * @return array Associative array with the IDs of the aliquots indexed by patient reference / aliquot type
  */
-function loadCQSBloodProcessingData($processFile) {
+function loadCQSBloodProcessingData($processFile, $teamCode) {
     try {
         $excel = Excel::open($processFile);
     } catch (Exception $e) {
         throw new ServiceException("Error opening file: $processFile: " . $e->getMessage());
     }
 
+    $filename = basename($processFile);
     $excel->dateFormatter('Y-m-d');
     $sheet = $excel->sheet("Datos");
     if (!$sheet) {
-        throw new ServiceException("Sheet 'Datos' not found in file: $processFile");
+        throw new ServiceException("Sheet 'Datos' not found in file: $filename");
     }
 
     // OR
-    $aliquots = [];
+    $patientSamples = [];
     foreach ($sheet->nextRow([], Excel::KEYS_FIRST_ROW) as $rowNum => $rowData) {
         // sample_id order_id sample_type collection_date plate position plate_location plate_collection plate_delivery patient_id volume haemolysis
         // plate_type key
         $bloodSampleId = $rowData['order_id'];
-        if (trim($rowData['sample_id']) == '') {
-            throw new ServiceException("Unknown sample type: " . $rowData['sample_type'] . "in file $processFile, row: $rowNum");
+
+        $sampleType = $rowData['sample_type'];
+        if (trim($sampleType) == '') {
+            throw new ServiceException("Sample type not informed for blood sample $bloodSampleId in file $filename, row: $rowNum");
         }
-        switch (strtolower($rowData['sample_type'])) {
+
+        $aliquotId = $rowData['sample_id'];
+        if (trim($aliquotId) == '') {
+            throw new ServiceException("Unknown sample type: " . $rowData['sample_type'] . "in file $filename, row: $rowNum");
+        }
+
+        switch (strtolower($sampleType)) {
             case 'sangre total' :
                 $type = 'WHOLE_BLOOD';
                 break;
@@ -354,14 +412,115 @@ function loadCQSBloodProcessingData($processFile) {
                 $type = 'SERUM';
                 break;
             default :
-                throw new ServiceException("Unknown sample type: " . $rowData['sample_type'] . "in file $processFile, row: $rowNum");
+                throw new ServiceException("Unknown sample type: " . $rowData['sample_type'] . "in file $filename, row: $rowNum");
         }
-        if (array_key_exists($bloodSampleId, $aliquots) && array_key_exists($type, $aliquots[$bloodSampleId])) {
-            $aliquots[$bloodSampleId][$type][] = $rowData['sample_id'];
+        if (array_key_exists($bloodSampleId, $patientSamples) && array_key_exists($type, $patientSamples[$bloodSampleId]['samples'])) {
+            $patientSamples[$bloodSampleId]['samples'][$type][] = $aliquotId;
         } else {
-            $aliquots[$bloodSampleId][$type] = [$rowData['sample_id']];
+            $patientSamples[$bloodSampleId]['samples'][$type] = [$aliquotId];
         }
     }
 
-    return $aliquots;
+    // Find in the eCRF the patient and blood processing form that corresponds to each blood sample
+    foreach (array_keys($patientSamples) as $bloodSampleId) {
+        try {
+            list($patient, $bpForm) = ServiceFunctions::findFormFromBloodSampleId($bloodSampleId);
+            $patientSamples[$bloodSampleId]['patient'] = $patient;
+            $patientSamples[$bloodSampleId]['form'] = $bpForm;
+            $patientSamples[$bloodSampleId]['displayName'] = $bloodSampleId . ' (' . $patient->getNickname() . ')';
+        } catch (Exception $e) {
+            $patientSamples[$bloodSampleId]['displayName'] = $bloodSampleId . ' (unknown patient)';
+            $patientSamples[$bloodSampleId]['error'] = $e->getMessage();
+        }
+    }
+
+    return $patientSamples;
+}
+
+/**
+ * Loads the data provided by IPIN about the blood processig of the patients from an Excel file.
+ * The returned value is a multi dimensional array indexed by patient reference and aliquot type.
+ * The contents of each item is an array with the IDs of the aliquots of that type for that patient.
+ * Example:
+ * ['PAT001' => [
+ * ···'patient' => APIPatient,
+ * ···'form' => APIForm (blood processing form),
+ * ···'samples' => [
+ * ·····'whole_blood' => [aliquot_id1, aliquot_id2, ...],
+ * ·····'plasma' => [aliquot_id3, aliquot_id4, ...],
+ * ···]
+ * ··]
+ * ]
+ *
+ * @param string $processFile
+ * @param string $teamCode Code of the team owner of the Subscription
+ * @return array Associative array with the IDs of the aliquots indexed by patient reference / aliquot type
+ */
+function loadIPINBloodProcessingData($processFile, $teamCode) {
+    try {
+        $excel = Excel::open($processFile);
+    } catch (Exception $e) {
+        throw new ServiceException("Error opening file: $processFile: " . $e->getMessage());
+    }
+
+    $filename = basename($processFile);
+    $excel->dateFormatter('Y-m-d');
+    $sheet = $excel->sheet(0);
+    if (!$sheet) {
+        throw new ServiceException("Sheet 'Datos' not found in file: $processFile");
+    }
+
+    // OR
+    $patientSamples = [];
+    foreach ($sheet->nextRow([], Excel::KEYS_FIRST_ROW) as $rowNum => $rowData) {
+        // sample_id order_id sample_type collection_date plate position plate_location plate_collection plate_delivery patient_id volume haemolysis
+        // plate_type key
+        $patientRef = $rowData['Patient'];
+        $sampleType = $rowData['Type'];
+        if (trim($sampleType) == '') {
+            throw new ServiceException("Sample type not informed for patient $patientRef in file $filename, row: $rowNum");
+        }
+
+        $aliquotId = $rowData['Aliquot Id'];
+        if (trim($aliquotId) == '') {
+            throw new ServiceException("Aliquot Id not informed for patient $patientRef, sample: $sampleType in file $filename, row: $rowNum");
+        }
+
+        switch (strtolower(substr($sampleType, 0, 2))) {
+            case 'bd' :
+                $type = 'WHOLE_BLOOD';
+                break;
+            case 'pl' :
+                $type = 'PLASMA';
+                break;
+            case 'pm' :
+                $type = 'PBMC';
+                break;
+            case 'se' :
+                $type = 'SERUM';
+                break;
+            default :
+                throw new ServiceException("Unknown sample type: " . $sampleType . "in file $filename, row: $rowNum");
+        }
+        if (array_key_exists($patientRef, $patientSamples) && array_key_exists($type, $patientSamples[$patientRef]['samples'])) {
+            $patientSamples[$patientRef]['samples'][$type][] = $aliquotId;
+        } else {
+            $patientSamples[$patientRef]['samples'][$type] = [$aliquotId];
+        }
+    }
+
+    // Find in the eCRF the patient and blood processing form that corresponds to each blood sample
+    foreach (array_keys($patientSamples) as $patientRef) {
+        try {
+            list($patient, $bpForm) = ServiceFunctions::findFormFromPatientRef($patientRef, $teamCode);
+            $patientSamples[$patientRef]['patient'] = $patient;
+            $patientSamples[$patientRef]['form'] = $bpForm;
+            $patientSamples[$patientRef]['displayName'] = $patientRef;
+        } catch (Exception $e) {
+            $patientSamples[$patientRef]['displayName'] = $patientRef;
+            $patientSamples[$patientRef]['error'] = $e->getMessage();
+        }
+    }
+
+    return $patientSamples;
 }

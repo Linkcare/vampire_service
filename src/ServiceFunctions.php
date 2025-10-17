@@ -832,6 +832,64 @@ class ServiceFunctions {
     }
 
     /**
+     * Find the "BLOOD PROCESSING" TASK of a patient given his reference
+     * Returns NULL if the FORM is up to date (the aliquots have already been registered)
+     *
+     * @throws ServiceException If the FORM of the patient cannot be found or if there is any error
+     * @param string $patientRef
+     * @param string $teamCode Code of the supscription owner team
+     * @return [APICase, APIForm]
+     */
+    static public function findFormFromPatientRef($patientRef, $teamCode) {
+        $api = LinkcareSoapAPI::getInstance();
+
+        // Step 1: Find patients of the program that have the specified blood sample ID
+        $filter = ['identifier' => ['code' => 'STUDY_REF', 'value' => $patientRef, 'program' => $GLOBALS['PROJECT_CODE'], 'team' => $teamCode]];
+        $patients = $api->case_search(json_encode($filter));
+
+        if (empty($patients)) {
+            throw new ServiceException(ErrorCodes::NOT_FOUND, "No patient found with reference $patientRef with an admission in the care plan " .
+                    $GLOBALS['PROJECT_CODE']);
+        } else if (count($patients) > 1) {
+            $ids = array_map(function ($p) {
+                /** @var APICase $p */
+                return $p->getId();
+            }, $patients);
+            throw new ServiceException(ErrorCodes::UNEXPECTED_ERROR, "More than one CQS patient found with reference $patientRef: Patient IDs: " .
+                    implode(',', $ids));
+        }
+
+        /** @var APICase $patient */
+        $patient = $patients[0];
+        // Step 2: Find the ADMISSION of the patient
+        $admission = self::findAdmission($patient->getId());
+        if (!$admission) {
+            throw new ServiceException(ErrorCodes::NOT_FOUND, "No admission found for patient $patientRef");
+        }
+
+        // Step 3: Find the BLOOD PROCESSING task of the admission
+        $filter = new TaskFilter();
+        $filter->setTaskCodes('PROC_BLOOD_SAMPLE');
+        $filter->setAdmissionIds($admission->getId());
+        $tasks = $patient->getTaskList(2, 0, $filter);
+        foreach ($tasks as $task) {
+            $bpForm = null;
+            foreach ($task->getForms() as $form) {
+                if ($form->isClosed() || $form->getFormCode() != 'BLOOD_PROCESSING') {
+                    continue;
+                }
+                $bpForm = $form;
+                break;
+            }
+        }
+        if (!$bpForm) {
+            throw new ServiceException(ErrorCodes::NOT_FOUND, "No BLOOD PROCESSING task found for patient $patientRef");
+        }
+
+        return [$patient, $bpForm];
+    }
+
+    /**
      * Find the "BLOOD PROCESSING" TASK where the blood sample ID is the one specified
      * Returns NULL if the FORM is up to date (the aliquots have already been registered)
      *
@@ -847,7 +905,8 @@ class ServiceFunctions {
         $patients = $api->case_search(json_encode($filter));
 
         if (empty($patients)) {
-            throw new ServiceException(ErrorCodes::NOT_FOUND, "No CQS patient found with blood sample ID $bloodSampleId");
+            throw new ServiceException(ErrorCodes::NOT_FOUND, "No patient found with blood sample ID $bloodSampleId in the care plan " .
+                    $GLOBALS['PROJECT_CODE']);
         } else if (count($patients) > 1) {
             $ids = array_map(function ($p) {
                 /** @var APICase $p */

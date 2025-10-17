@@ -18,7 +18,8 @@ $GLOBALS['LAB_TEAMS'] = ['SYNLAB' => ['is_lab' => 1, 'is_clinical_site' => 0], '
         'CQS' => ['is_lab' => 0, 'is_clinical_site' => 1], 'IPIN' => ['is_lab' => 0, 'is_clinical_site' => 1],
         'AUTH' => ['is_lab' => 0, 'is_clinical_site' => 0]];
 
-$GLOBALS['CQS_IMPORT_DIR'] = '/var/www/html/services/cqs_import';
+$GLOBALS['CQS_IMPORT_DIR'] = '/var/www/html/services/vampire_service/cqs_import';
+$GLOBALS['IPIN_IMPORT_DIR'] = '/var/www/html/services/vampire_service/ipin_import';
 
 /**
  * ** OPTIONAL CONFIGURATION PARAMETERS ***
@@ -78,4 +79,4 @@ $GLOBALS['SHIPMENT_TRACKING_FORM'] = 'SHIPMENT_TRACKING_FORM';
 
 date_default_timezone_set($GLOBALS['DEFAULT_TIMEZONE']);
 
-$GLOBALS['VERSION'] = '1.2';
+$GLOBALS['VERSION'] = '1.3';
