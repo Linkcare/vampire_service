@@ -230,6 +230,7 @@ function import_blood_processing_data($parameters) {
     $numSuccessful = 0;
     $numSkipped = 0;
     $executionResult = BackgroundServiceResponse::SUCCESS;
+    $filesProcessed = 0;
 
     $teamsToImport = ['CQS', 'IPIN'];
     foreach ($teamsToImport as $teamCode) {
@@ -268,6 +269,8 @@ function import_blood_processing_data($parameters) {
         $processFile = $filePath . '.processing';
         $logFile = $filePath . '.log';
         ServiceLogger::getInstance()->setCustomLogFile($logFile);
+
+        $filesProcessed++;
 
         if (file_exists($processFile) && !unlink($processFile)) {
             $msg = "$teamCode: Error deleting previous file: $processFile. Verify the the directory is writable.";
@@ -332,9 +335,16 @@ function import_blood_processing_data($parameters) {
         }
     }
 
-    $msg = "Blood processing data import process finished. Errors: $numErrors, Successful: $numSuccessful, Skipped: $numSkipped, Total samples processed: " .
-            count($importedData);
-    $serviceResponse->setMessage($msg);
+    if ($filesProcessed == 0 && $executionResult != BackgroundServiceResponse::ERROR) {
+        // There were no files to process. Indicate IDLE status
+        $executionResult = BackgroundServiceResponse::IDLE;
+        $serviceResponse->setMessage("No Blood Processing data files pending to import.");
+    } else {
+        $msg = "Blood processing data import process finished. Errors: $numErrors, Successful: $numSuccessful, Skipped: $numSkipped, Total samples processed: " .
+                count($importedData);
+        $serviceResponse->setMessage($msg);
+    }
+
     $serviceResponse->setCode($executionResult);
 
     if ($executionResult == BackgroundServiceResponse::SUCCESS) {
