@@ -485,25 +485,30 @@ function loadIPINBloodProcessingData($processFile, $teamCode) {
     foreach ($sheet->nextRow([], Excel::KEYS_FIRST_ROW) as $rowNum => $rowData) {
         // sample_id order_id sample_type collection_date plate position plate_location plate_collection plate_delivery patient_id volume haemolysis
         // plate_type key
-        $patientRef = $rowData['Patient'];
-        $sampleType = $rowData['Type'];
-        if (trim($sampleType) == '') {
-            throw new ServiceException("Sample type not informed for patient $patientRef in file $filename, row: $rowNum");
+        $patientRef = trim($rowData['PATIENT_REF']);
+        if (!$patientRef) {
+            throw new ServiceException("Patient reference (column PATIENT_REF) not informed in file $filename, row: $rowNum");
+        }
+        $sampleType = trim($rowData['SAMPLE_TYPE']);
+        if (!$sampleType) {
+            throw new ServiceException("Sample type (column SAMPLE_TYPE) not informed for patient $patientRef in file $filename, row: $rowNum");
         }
 
-        $aliquotId = $rowData['Aliquot Id'];
-        if (trim($aliquotId) == '') {
-            throw new ServiceException("Aliquot Id not informed for patient $patientRef, sample: $sampleType in file $filename, row: $rowNum");
+        $aliquotId = trim($rowData['ID_ALIQUOT']);
+        if (!$aliquotId) {
+            throw new ServiceException("Aliquot Id (column ID_ALIQUOT) not informed for patient $patientRef, sample: $sampleType in file $filename, row: $rowNum");
         }
 
         switch (strtolower(substr($sampleType, 0, 2))) {
             case 'bd' :
+            case 'wh' :
                 $type = 'WHOLE_BLOOD';
                 break;
             case 'pl' :
                 $type = 'PLASMA';
                 break;
             case 'pm' :
+            case 'pb' :
                 $type = 'PBMC';
                 break;
             case 'se' :
