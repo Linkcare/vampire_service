@@ -84,6 +84,11 @@ class Shipment {
         return $shipment;
     }
 
+    /**
+     *
+     * @param string $timezone Convert the dates to the provided timezone
+     * @return stdClass
+     */
     public function toJSON($timezone = null) {
         $json = new stdClass();
         $json->id = $this->id;
@@ -130,6 +135,7 @@ class Shipment {
         $this->trackedPropertyCopy($json, 'sentToId');
         $this->trackedPropertyCopy($json, 'sendDate', $timezone);
         $this->trackedPropertyCopy($json, 'senderId');
+        $this->trackedPropertyCopy($json, 'sender');
         $this->trackedPropertyCopy($json, 'receptionDate', $timezone);
         $this->trackedPropertyCopy($json, 'receiverId');
         $this->trackedPropertyCopy($json, 'receiver');
@@ -190,6 +196,7 @@ class Shipment {
      * If a patientId is provided, the list is filtered to return only the aliquots of that patient.
      *
      * @param number $patientId
+     * @param string $timezone To convert the dates to the provided timezone
      * @return Aliquot[]
      */
     public function getAliquots($patientId = null, $timezone = null) {
@@ -278,7 +285,7 @@ class Shipment {
         }
 
         if (empty($updateFields)) {
-            throw new ServiceException(ErrorCodes::DATA_MISSING, "No data provided to update the shipment");
+            return; // Nothing to update
         }
 
         $updateFields = implode(', ', $updateFields);
@@ -286,7 +293,7 @@ class Shipment {
         Database::getInstance()->executeBindQuery($sql, $arrVariables);
 
         if ($this->modified('receptionStatusId')) {
-            $conditionId = ($this->receptionStatusId == ReceptionStatus::ALL_BAD ? AliquotDamage::WHOLE_DAMAGE : null);
+            $conditionId = ($this->receptionStatusId == ReceptionStatus::ALL_BAD ? AliquotConditions::WHOLE_DAMAGE : null);
             $arrVariables = [':shipmentId' => $this->id, ':conditionId' => $conditionId];
             $sql = "UPDATE SHIPPED_ALIQUOTS SET ID_ALIQUOT_CONDITION = :conditionId WHERE ID_SHIPMENT = :shipmentId";
             Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);

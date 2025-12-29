@@ -114,7 +114,7 @@ class ServiceFunctions {
             }
         }
 
-        self::trackAliquots($dbRows);
+        ShipmentFunctions::trackAliquots($dbRows, AliquotAuditActions::CREATED);
 
         // Concatenate the added aliquot IDs into a string
         $aliquotsIncluded = implode(',', $aliquotIds);
@@ -274,18 +274,10 @@ class ServiceFunctions {
         }
 
         // Finally update the aliquots to indicate that they have already been tracked in a TASK of the eCRF
-        $arrVariables = [':shipmentId' => $shipment->id, ':taskId' => $shipmentTask->getId()];
         $aliquotIds = array_map(function ($aliquot) {
             return $aliquot->id;
         }, $aliquots);
-        $inCondition = DbHelper::bindParamArray('aliquotId', $aliquotIds, $arrVariables);
-        $sqls = [];
-        $sqls[] = "UPDATE SHIPPED_ALIQUOTS SET ID_SHIPMENT_TASK = :taskId WHERE ID_SHIPMENT=:shipmentId AND ID_ALIQUOT IN ($inCondition)";
-        $sqls[] = "UPDATE ALIQUOTS SET ID_TASK = :taskId WHERE ID_SHIPMENT=:shipmentId AND ID_ALIQUOT IN ($inCondition)";
-        $sqls[] = "UPDATE ALIQUOTS_HISTORY SET ID_TASK = :taskId WHERE ID_SHIPMENT=:shipmentId AND ID_ALIQUOT IN ($inCondition)";
-        foreach ($sqls as $sql) {
-            Database::getInstance()->executeBindQuery($sql, $arrVariables);
-        }
+        ShipmentFunctions::markTrackedAliquots('SHIPMENT', $shipment->id, $shipmentTask->getId(), $aliquotIds);
     }
 
     /**
@@ -378,278 +370,20 @@ class ServiceFunctions {
         }
 
         // Finally update the aliquots to indicate that they have already been tracked in a TASK of the eCRF
-        $arrVariables = [':shipmentId' => $shipment->id, ':taskId' => $shipmentTask->getId()];
         $aliquotIds = array_map(function ($aliquot) {
             return $aliquot->id;
         }, $aliquots);
-        $inCondition = DbHelper::bindParamArray('aliquotId', $aliquotIds, $arrVariables);
-        $sqls = [];
-        $sqls[] = "UPDATE SHIPPED_ALIQUOTS SET ID_RECEPTION_TASK = :taskId WHERE ID_SHIPMENT=:shipmentId";
-        $sqls[] = "UPDATE ALIQUOTS SET ID_TASK = :taskId WHERE ID_SHIPMENT=:shipmentId AND ID_ALIQUOT IN ($inCondition)";
-        $sqls[] = "UPDATE ALIQUOTS_HISTORY SET ID_TASK = :taskId WHERE ID_SHIPMENT=:shipmentId AND ID_ALIQUOT IN ($inCondition)";
-        foreach ($sqls as $sql) {
-            Database::getInstance()->executeBindQuery($sql, $arrVariables);
-        }
+        ShipmentFunctions::markTrackedAliquots('RECEPTION', $shipment->id, $shipmentTask->getId(), $aliquotIds);
     }
 
-    /**
-     * Prepares a TASK to select the aliquots that have been used to extract exosomes.
-     * The preparation consists in:
-     * - Retrieving the most recent information about the blood samples
-     * - Selecting the blood samples that belong to the laboratory
-     * - Storing a table with the selected samples in the in the Selection form
-     *
-     * @param string $preparationFormId Reference of the Form that has invoked the service to prepare the selection of processed samples
-     * @param string $selectionFormId Reference of the FORM where the aliquots available to send will be stored
-     * @param string $sampleType Type of blood sample to be shipped
-     * @param string $labId Reference of the Team (laboratory) that has processed the blood samples to extract the aliquots
-     * @return ServiceResponse
-     */
-    static public function prepareForExosomes($preparationFormId, $selectionFormId, $sampleType, $labId) {
+    static private function addLocation($locationId) {
         $api = LinkcareSoapAPI::getInstance();
 
-        // Find the reference of the Form that contains the last known status of the blood samples
-        $formula = 'ADMISSION.FORM{' . $sampleType . '_STATUS_FORM}:LAST.REF';
-        $sampleStatusFormId = $api->formula_exec($preparationFormId, null, $formula);
-        if (!$sampleStatusFormId) {
-            throw new ServiceException(ErrorCodes::DATA_MISSING, "Last status form of the $sampleType blood samples not found");
+        if (ShipmentFunctions::locationExists($locationId)) {
+            return;
         }
-
-        /** @var APIForm $samplesStatusForm */
-        /** @var APIQuestion[][] $availableAliquotsArray */
-        list($samplesStatusForm, $availableAliquotsArray) = self::loadAliquotStatus($sampleStatusFormId, AliquotStatus::AVAILABLE, $labId);
-        $selectionForm = $api->form_get_summary($selectionFormId);
-
-        // Fill the array of available aliquots in the shipment form
-        $arrQuestions = [];
-
-        // Procedure information stored as a table (1 row)
-        $ix = 1;
-
-        self::updateTextQuestionValue($selectionForm, 'NUM_AVAILABLE_ALIQUOTS', count($availableAliquotsArray));
-
-        if (!empty($availableAliquotsArray)) {
-            if (($arrayHeader = $selectionForm->findQuestion(AliquotTrackingItems::ARRAY)) && $arrayHeader->getType() == APIQuestionTypes::ARRAY) {
-                foreach ($availableAliquotsArray as $row) {
-                    $aliquotIds[] = $row[AliquotStatusItems::ID]->getValue();
-                    $arrQuestions[] = self::updateArrayTextQuestionValue($selectionForm, $arrayHeader->getId(), $ix, AliquotTrackingItems::ID,
-                            $row[AliquotStatusItems::ID]->getValue());
-
-                    $ix++;
-                }
-            } else {
-                throw new ServiceException(ErrorCodes::DATA_MISSING, "The array of aliquots (item " . AliquotTrackingItems::ARRAY .
-                        ") does not exist in the Exosomes selection form");
-            }
-        }
-
-        // Remove null entries
-        $arrQuestions = array_filter($arrQuestions);
-
-        if (!empty($arrQuestions)) {
-            $api->form_set_all_answers($selectionForm->getId(), $arrQuestions, false);
-        }
-
-        // Concatenate the aliquot IDs into a string
-        $aliquotsIncluded = implode(',', $aliquotIds);
-        return new ServiceResponse($aliquotsIncluded, null);
-    }
-
-    /**
-     * Loads the list of aliquots that have been marked as "processed" to extract exosomes and:
-     * <ul>
-     * <li>Updates the status of the aliquots used for exosomes indicating that the new status is "used" and also indicating the ID of the exosomes
-     * aliquot created</li>
-     * <li>Creates a new aliquot of type "EXOSOMES" for each aliquot processed and stores the information in Exosomes status FORM</li>
-     * </ul>
-     *
-     * @param string $bloodProcessingFormId Reference of the FORM with the aliquots to be added
-     * @param string $labTeamId Reference of the TEAM that has processed the blood samples
-     * @param string $procDate Blood processing date
-     * @param string $procTime Blood processing time
-     * @return ServiceResponse
-     */
-    static public function addExosomeAliquots($patientId, $patientRef, $bloodProcessingFormId, $labTeamId, $procDateUTC) {
-        $api = LinkcareSoapAPI::getInstance();
-        $exosomesStatusFormCode = 'EXOSOMES_STATUS_FORM';
-        $srcAliquotStatusFormCode = 'PLASMA_STATUS_FORM';
-
-        // Load the FORM that contains the processed aliquots that have been used for exosomes
-        $processingForm = $api->form_get_summary($bloodProcessingFormId);
-        // Check if there are aliquots of this sample type
-        $processedAliquotsArray = $processingForm->getArrayQuestions(AliquotTrackingItems::ARRAY);
-        if (count($processedAliquotsArray) == 0) {
-            throw new ServiceException(ErrorCodes::DATA_MISSING, "The array of aliquots in the selection form does not exist");
-        }
-
-        $containerTaskActivities = $api->task_activity_list($processingForm->getParentId());
-        foreach ($containerTaskActivities as $taskActivity) {
-            if (!$taskActivity instanceof APIForm) {
-                continue;
-            }
-            $forms[$taskActivity->getFormCode()] = $taskActivity;
-        }
-
-        // Verify that the STATUS FORM to store the new exosome aliquots exists
-        if (!array_key_exists($exosomesStatusFormCode, $forms)) {
-            throw new ServiceException(ErrorCodes::FORM_MISSING, "The FORM $exosomesStatusFormCode does not exist in the blood processing task. It is not possible to store the processed aliquots");
-        }
-        $destStatusForm = $forms[$exosomesStatusFormCode];
-
-        $destArrayHeader = $destStatusForm->findQuestion(AliquotStatusItems::ARRAY);
-        if (!$destArrayHeader) {
-            throw new ServiceException(ErrorCodes::DATA_MISSING, "The array of aliquots does not exist in the exosomes status form");
-        }
-        $existingExosomesArray = $destStatusForm->getArrayQuestions(AliquotStatusItems::ARRAY);
-
-        /*
-         * Verify that the STATUS FORM of the aliquots processed exists. The aliquots in this FORM will be updated to indicate that they have been
-         * used for exosomes
-         */
-        if (!array_key_exists($srcAliquotStatusFormCode, $forms)) {
-            throw new ServiceException(ErrorCodes::FORM_MISSING, "The FORM $srcAliquotStatusFormCode does not exist in the blood processing task. It is not possible to update the status of the aliquots used for exosomes");
-        }
-        $srcStatusForm = $forms[$srcAliquotStatusFormCode];
-
-        $srcArrayHeader = $srcStatusForm->findQuestion(AliquotStatusItems::ARRAY);
-        if (!$srcArrayHeader) {
-            throw new ServiceException(ErrorCodes::DATA_MISSING, "The array of aliquots does not exist in the plasma status form");
-        }
-        $srcAliquotStatusArray = $srcStatusForm->getArrayQuestions(AliquotStatusItems::ARRAY);
-
-        $strAliquotsProcessed = [];
-
-        // Load the existing aliquots of the status FORM. Additional rows will be appended for the new aliquots
-        $existingExosomesArray = $destStatusForm->getArrayQuestions(AliquotStatusItems::ARRAY);
-
-        $exosomesQuestionsArray = [];
-        $exosomesQuestionsArray[] = self::updateTextQuestionValue($destStatusForm, AliquotStatusItems::SAMPLE_TYPE, 'EXOSOMES');
-
-        foreach ($existingExosomesArray as $row) {
-            foreach ($row as $question) {
-                $exosomesQuestionsArray[] = $question;
-            }
-        }
-
-        // Add the new aliquots to the status form
-        $ix = count($existingExosomesArray) + 1;
-
-        $srcAliquotIds = []; // IDs of the aliquots processed
-        $failedAliquotIds = []; // IDs of the aliquots that have been processed but the extraction of exosomes has failed
-        $exoSuffix = '_exo'; // Suffix to be added to the IDs of the aliquots used for exosomes
-
-        $dbRows = [];
-        foreach ($processedAliquotsArray as $row) {
-            if (!array_key_exists(AliquotTrackingItems::ALIQUOT_USED_FOR_EXOSOMES, $row)) {
-                throw new ServiceException(ErrorCodes::DATA_MISSING, "The item (" . AliquotTrackingItems::ALIQUOT_USED_FOR_EXOSOMES .
-                        ") indicating whether an aliquot has been used for exosomes is missing");
-            }
-            if ($row[AliquotTrackingItems::ALIQUOT_USED_FOR_EXOSOMES]->getValue() != 1) {
-                // Skip the aliquots that have not been used for exosomes
-                continue;
-            }
-
-            $aliquotId = $row[AliquotTrackingItems::ID]->getValue();
-            $srcAliquotIds[] = $aliquotId;
-
-            $processedAliquotCondition = null;
-            if (trim($row[AliquotTrackingItems::EXOSOMES_SUCCESS]->getValue()) !== "0") {
-                /** @var APIQuestion[] $row */
-                // Aliquot IDs are suffixed with "_exo" to track the original aliquot from which the exosome aliquot was extracted
-                $exosomeId = $aliquotId . $exoSuffix;
-
-                $dbColumns = [];
-                $dbColumns['ID_ALIQUOT'] = $exosomeId;
-                $dbColumns['ID_PATIENT'] = $patientId;
-                $dbColumns['PATIENT_REF'] = $patientRef;
-                $dbColumns['SAMPLE_TYPE'] = 'EXOSOMES';
-                $dbColumns['ID_LOCATION'] = $labTeamId;
-                $dbColumns['ID_STATUS'] = AliquotStatus::AVAILABLE;
-                $dbColumns['ID_TASK'] = $processingForm->getParentId();
-                $dbColumns['ALIQUOT_CREATED'] = $procDateUTC;
-                $dbColumns['ALIQUOT_UPDATED'] = $procDateUTC;
-
-                //
-                $exosomesQuestionsArray[] = self::updateArrayTextQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix, AliquotStatusItems::ID,
-                        $exosomeId);
-                $exosomesQuestionsArray[] = self::updateArrayTextQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix,
-                        AliquotStatusItems::CREATION_DATE, DateHelper::datePart($procDateUTC));
-                $exosomesQuestionsArray[] = self::updateArrayTextQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix,
-                        AliquotStatusItems::CREATION_TIME, DateHelper::timePart($procDateUTC));
-                $exosomesQuestionsArray[] = self::updateArrayOptionQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix,
-                        AliquotStatusItems::LOCATION, null, $labTeamId);
-                $ix++;
-                $dbRows[] = $dbColumns;
-            } else {
-                // Something went wrong during the extraction of the exosomes, so we will not create the exosomes aliquot
-                $processedAliquotCondition = AliquotDamage::EXOSOMES_FAILURE;
-                $failedAliquotIds[] = $aliquotId;
-            }
-
-            // Update the processed aliquot to indicate that it has been used for exosomes
-            $dbColumns = [];
-            $dbColumns['ID_ALIQUOT'] = $aliquotId;
-            $dbColumns['ID_STATUS'] = AliquotStatus::USED;
-            if ($processedAliquotCondition) {
-                $dbColumns['ID_ALIQUOT_CONDITION'] = $processedAliquotCondition;
-            }
-            $dbColumns['ALIQUOT_UPDATED'] = $procDateUTC;
-            $dbRows[] = $dbColumns;
-        }
-
-        // Remove null entries
-        $exosomesQuestionsArray = array_filter($exosomesQuestionsArray);
-
-        /*
-         * Update the status of the original (e.g PLASMA) aliquots processed to indicate:
-         * - The new status is now "Used"
-         * - The ID of the exosome aliquot have been created from each processed aliquot
-         */
-        $srcQuestionsArray = [];
-        $found = 0;
-        foreach ($srcAliquotStatusArray as $ixRow => $row) {
-            if (!in_array($row[AliquotStatusItems::ID]->getValue(), $srcAliquotIds)) {
-                // Skip the aliquots that have not been used for exosomes
-                continue;
-            }
-            $found++;
-            $id = $row[AliquotStatusItems::ID]->getValue();
-            $statusQuestion = self::updateArrayOptionQuestionValue($srcStatusForm, $srcArrayHeader->getId(), $ixRow, AliquotStatusItems::STATUS, null,
-                    AliquotStatus::USED, false);
-            $srcQuestionsArray[] = $statusQuestion;
-            if (in_array($id, $failedAliquotIds)) {
-                // The extraction of exosomes has failed => Indicate the damage status
-                $damageQuestion = self::updateArrayOptionQuestionValue($srcStatusForm, $srcArrayHeader->getId(), $ixRow, AliquotStatusItems::DAMAGE,
-                        null, AliquotDamage::EXOSOMES_FAILURE, false);
-                $srcQuestionsArray[] = $damageQuestion;
-            } else {
-                // Extraction of exosomes has been successful => store the ID of the exosomes aliquot
-                $newIdQuestion = $row[AliquotStatusItems::EXOSOSOMES_ID];
-                $newIdQuestion->setAnswer($id . $exoPrefix);
-                $srcQuestionsArray[] = $newIdQuestion;
-            }
-        }
-
-        if (count($srcAliquotIds) != $found) {
-            // ERROR: Not all the aliquots marked as processed were found in the status form
-            throw new ServiceException(ErrorCodes::UNEXPECTED_ERROR, "One or more aliquots marked as used for exosomes were not found in the status form and can't be updated");
-        }
-
-        if (!empty($exosomesQuestionsArray)) {
-            $api->form_set_all_answers($destStatusForm->getId(), $exosomesQuestionsArray, false);
-        }
-
-        if (!empty($srcQuestionsArray)) {
-            foreach ($srcQuestionsArray as $question) {
-                $question->save();
-            }
-        }
-
-        self::trackAliquots($dbRows);
-
-        // Concatenate the processed aliquot IDs into a string
-        $strAliquotsProcessed = implode(',', $srcAliquotIds);
-        return new ServiceResponse($strAliquotsProcessed, null);
+        $team = $api->team_get($locationId);
+        ShipmentFunctions::addLocation($locationId, $team->getCode(), $team->getName());
     }
 
     /**
@@ -784,43 +518,6 @@ class ServiceFunctions {
                 if (!in_array($key, $itemCodes)) {
                     throw new ServiceException(ErrorCodes::DATA_MISSING, "Error loading the column '$key' of the blood sample $ix from the status form " .
                             $samplesStatusForm->getId());
-                }
-            }
-
-            $aliquotId = $row[AliquotTrackingItems::ID]->getValue();
-            $aliquotsArray[$aliquotId] = $row;
-        }
-
-        return $aliquotsArray;
-    }
-
-    /**
-     * Retrieves the list of aliquots of a preparation FORM (for example a shipment or reception FORM)
-     * The return value is an associative array indexed by the aliquot ID
-     *
-     * @param int $action Type of action performed on the aliquots. Use one of the AliquotAction constants
-     * @param string $modifiedFormId Reference of the FORM with the modified aliquots. No all the aliquots may have necessarily been modified.
-     * @return string[]
-     */
-    static public function loadAffectedAliquots($action, $modifiedFormId) {
-        $api = LinkcareSoapAPI::getInstance();
-        $samplesStatusForm = $api->form_get_summary($modifiedFormId);
-
-        // Fetch all the rows of the array. The list of fields loaded will depend on the type of action
-        if ($action == AliquotActions::REGISTER_EXOSOMES) {
-            $requiredItems = [AliquotTrackingItems::ID, AliquotTrackingItems::ALIQUOT_USED_FOR_EXOSOMES];
-        } else {
-            throw new ServiceException(ErrorCodes::UNSUPPORTED_ACTION, "Requestes action: " . AliquotActions::getName($action));
-        }
-        $array = $samplesStatusForm->getArrayQuestions(AliquotTrackingItems::ARRAY);
-
-        // Verify that all the required items are present in the array and create an associative array indexed by the aliquot ID
-        $aliquotsArray = [];
-        foreach ($array as $ix => $row) {
-            $itemCodes = array_keys($row);
-            foreach ($requiredItems as $key) {
-                if (!in_array($key, $itemCodes)) {
-                    throw new ServiceException(ErrorCodes::DATA_MISSING, "Error loading the column '$key' of the blood sample $ix from the status form $modifiedFormId");
                 }
             }
 
@@ -1110,82 +807,6 @@ class ServiceFunctions {
             throw new ServiceException(ErrorCodes::DATA_MISSING, "Error updating form " . $form->getFormCode() . ". Item '$itemCode' not found");
         }
         return $q;
-    }
-
-    /**
-     * Creates or updates a tracking of aliquots in the database.
-     *
-     * @param array $dbRows
-     */
-    static public function trackAliquots($dbRows) {
-        $arrVariables = [];
-
-        $dbColumnNames = ['ID_ALIQUOT', 'ID_PATIENT', 'PATIENT_REF', 'SAMPLE_TYPE', 'ID_LOCATION', 'ID_STATUS', 'ID_ALIQUOT_CONDITION', 'ID_TASK',
-                'ALIQUOT_CREATED', 'ALIQUOT_UPDATED', 'ID_SHIPMENT', 'RECORD_TIMESTAMP'];
-
-        $now = DateHelper::currentDate();
-        foreach ($dbRows as $row) {
-            $arrVariables = [];
-            $row['RECORD_TIMESTAMP'] = $now; // Add the current timestamp to track the real time when the DB record was created/modified
-
-            // Read the last known values of the aliquot to be updated
-            $sqlPrev = "SELECT * FROM ALIQUOTS WHERE ID_ALIQUOT=:id";
-            $rst = Database::getInstance()->ExecuteBindQuery($sqlPrev, $row['ID_ALIQUOT']);
-            $prevValues = [];
-            while ($rst->Next()) {
-                foreach ($rst->getColumnNames() as $colName) {
-                    $prevValues[$colName] = $rst->GetField($colName);
-                }
-            }
-
-            $keyColumns = ['ID_ALIQUOT' => ':id_aliquot'];
-
-            $updateColumns = [];
-            foreach ($dbColumnNames as $colName) {
-                $parameterName = ':' . strtolower($colName);
-                if (array_key_exists($colName, $row)) {
-                    // New value provided for the column
-                    $arrVariables[$parameterName] = $row[$colName];
-                } elseif (array_key_exists($colName, $prevValues)) {
-                    // If the column is not present in the row, we must keep the previous value
-                    $arrVariables[$parameterName] = $prevValues[$colName];
-                } else {
-                    $arrVariables[$parameterName] = null;
-                }
-                if (!array_key_exists($colName, $keyColumns)) {
-                    $updateColumns[$colName] = $parameterName;
-                }
-            }
-
-            $sql = Database::getInstance()->buildInsertOrUpdateQuery('ALIQUOTS', $keyColumns, $updateColumns);
-            Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
-
-            /*
-             * Add the tracking of the aliquots in the ALIQUOTS_HISTORY table
-             */
-            $sql = "INSERT INTO ALIQUOTS_HISTORY (ID_ALIQUOT, ID_TASK, ID_LOCATION, ID_STATUS, ID_ALIQUOT_CONDITION, ALIQUOT_UPDATED, ID_SHIPMENT, RECORD_TIMESTAMP) 
-                        VALUES (:id_aliquot, :id_task, :id_location, :id_status, :id_aliquot_condition, :aliquot_updated, :id_shipment, :record_timestamp)";
-            Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
-        }
-    }
-
-    static private function addLocation($locationId) {
-        $api = LinkcareSoapAPI::getInstance();
-
-        $sql = "SELECT ID_LOCATION,NAME FROM LOCATIONS WHERE ID_LOCATION=:id";
-        $rst = Database::getInstance()->ExecuteBindQuery($sql, [':id' => $locationId]);
-        if ($rst->Next()) {
-            return;
-        }
-
-        $team = $api->team_get($locationId);
-
-        $keyColumns = ['ID_LOCATION' => ':id'];
-        $updateColumns = ['NAME' => ':name', 'CODE' => ':code', 'IS_LAB' => ':is_lab', 'IS_CLINICAL_SITE' => ':is_clinical_site'];
-        $arrVariables = [':id' => $team->getId(), ':name' => $team->getName(), ':code' => $team->getCode(), ':is_lab' => 0, ':is_clinical_site' => 1];
-        $sql = Database::getInstance()->buildInsertOrUpdateQuery('LOCATIONS', $keyColumns, $updateColumns);
-
-        Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
     }
 
     static private function encodeTaskInitialValues($arrValues) {

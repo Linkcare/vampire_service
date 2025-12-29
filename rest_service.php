@@ -36,10 +36,10 @@ $function = $_GET['function'];
 $logger = ServiceLogger::init($GLOBALS['LOG_LEVEL'], $GLOBALS['LOG_DIR']);
 
 $systemFunctions = ['deploy_service'];
-$programFunctions = ['add_aliquots', 'prepare_samples_for_exosomes', 'add_exosomes'];
+$programFunctions = ['add_aliquots'];
 $shipmentManagementFunctions = [shipment_locations, 'shipment_list', 'shipment_create', 'shipment_details', 'shippable_aliquots', 'find_aliquot',
         'shipment_add_aliquot', 'shipment_remove_aliquot', 'shipment_update', 'shipment_send', 'shipment_start_reception', 'shipment_finish_reception',
-        'shipment_delete', 'shipment_set_aliquot_condition'];
+        'shipment_delete', 'shipment_set_aliquot_condition', 'aliquot_list', 'aliquot_bulk_change', 'aliquots_report_by_patient'];
 
 $publicFunctions = array_merge($systemFunctions, $programFunctions, $shipmentManagementFunctions);
 
@@ -53,12 +53,25 @@ if (in_array($function, $publicFunctions)) {
 
         // The public rest function invoked from the Linkcare Platform's PROGRAM must be executed in a service session
         $surrogate = in_array($function, $programFunctions);
-        initServiceSession($authToken, $parameters, $surrogate);
+        $apiSession = initServiceSession($authToken, $parameters, $surrogate);
         Database::init($GLOBALS['SERVICE_DB_URI'], $logger);
         Database::getInstance()->beginTransaction(); // Execute all commands in transactional mode
-        $serviceResponse = $function($parameters);
+        if (in_array($function, $shipmentManagementFunctions)) {
+            ShipmentFunctions::setTimezone($apiSession->getTimezone());
+            ShipmentFunctions::setActiveLocation($apiSession->getTeamId());
+            $reponse = ShipmentFunctions::{$function}($parameters);
+            $serviceResponse = new ServiceResponse($reponse, null);
+        } else {
+            $serviceResponse = $function($parameters);
+        }
         Database::getInstance()->commit();
     } catch (ServiceException $e) {
+        if (Database::getInstance()) {
+            Database::getInstance()->rollback();
+        }
+        $logger->error("Service Exception: " . $e->getErrorMessage());
+        $serviceResponse = new ServiceResponse(null, $e->getErrorMessage());
+    } catch (ShipmentException $e) {
         if (Database::getInstance()) {
             Database::getInstance()->rollback();
         }
@@ -95,6 +108,8 @@ return;
  * @param string $authToken Session token provided in the request headers
  * @param stdClass $parameters Parameters provided in the request body
  * @param bool $surrogateSession If true, the user session will be surrogated by the SERVICE_USER
+ *       
+ * @return APISession The session of the user calling the service
  */
 function initServiceSession($authToken, $parameters, $surrogateSession = true) {
     if (!$authToken) {
@@ -116,6 +131,8 @@ function initServiceSession($authToken, $parameters, $surrogateSession = true) {
         WSAPI::apiConnect($GLOBALS["WS_LINK"], null, $GLOBALS["SERVICE_USER"], $GLOBALS["SERVICE_PASSWORD"], null, null, false, $userLanguage,
                 $userTimezone);
     }
+
+    return $apiSession->getSession();
 }
 
 /* ****************************************************************** */
@@ -146,94 +163,3 @@ function add_aliquots($parameters) {
 
     return ServiceFunctions::addAliquots($patientId, $patientRef, $bloodProcessingFormId, $labTeamId, $procDate, $procTime);
 }
-
-/**
- * Adds a new set of exosomes extracted from other aliquots of a patient.
- * This function is used after a laboratory processes blood samples from a patient to extract exosomes.<br>
- * The function expects that the FORM to hold the list of aliquot status records already exists into the same TASK, and the FORM CODES is
- * "EXOSOMES_STATUS_FORM"
- *
- * @param stdClass $parameters
- */
-function add_exosomes($parameters) {
-    // Reference of the FORM that is initializing a shipment
-    $bloodProcessingFormId = loadParam($parameters, 'processing_form');
-    // Reference of the TEAM (laborarory) that has processed the blood samples and generated the aliquots
-    $labTeamId = loadParam($parameters, 'lab_team');
-    $procDatetime = loadParam($parameters, 'datetime');
-    $patientId = loadParam($parameters, 'patient');
-    $patientRef = loadParam($parameters, 'patient_ref');
-
-    if (!$bloodProcessingFormId) {
-        throw new ServiceException(ErrorCodes::DATA_MISSING, "The ID of the Blood Processing Form is missing");
-    }
-    if (!$labTeamId) {
-        throw new ServiceException(ErrorCodes::DATA_MISSING, "The ID of the laboratory Team is missing");
-    }
-    if (!$procDatetime) {
-        throw new ServiceException(ErrorCodes::DATA_MISSING, "The processing datetime of the blood samples is missing");
-    }
-    if (!$patientId) {
-        throw new ServiceException(ErrorCodes::DATA_MISSING, "The ID of the patient is missing");
-    }
-    if (!$patientRef) {
-        throw new ServiceException(ErrorCodes::DATA_MISSING, "The reference of the patient is missing");
-    }
-
-    return ServiceFunctions::addExosomeAliquots($patientId, $patientRef, $bloodProcessingFormId, $labTeamId, $procDatetime);
-}
-
-/**
- * Prepares a TASK for selecting the blood samples that have been used to extract exosomes
- *
- * @param stdClass $parameters
- */
-function prepare_samples_for_exosomes($parameters) {
-    // Reference of the FORM that is preparating the list of aliquots that are available to perform the exosome extraction
-    $preparationFormId = loadParam($parameters, 'preparation_form');
-    // Reference of the FORM where the available aliquots of the selected blood type will be copied so that a user can indicate which ones were
-    // processed
-    $selectionFormId = loadParam($parameters, 'selection_form');
-    // Type of blood sample processed (WHOLE_BLOOD, PLASMA...)
-    $sampleType = strtoupper(loadParam($parameters, 'sample_type'));
-    // Reference of the TEAM that has processed the blood samples and generated the exosomes
-    $labId = strtoupper(loadParam($parameters, 'lab_id'));
-
-    return ServiceFunctions::prepareForExosomes($preparationFormId, $selectionFormId, $sampleType, $labId);
-}
-
-/**
- * Updates the status of a set of aliquots.
- *
- * @deprecated
- * @param stdClass $parameters
- * @return ServiceResponse
- */
-function update_samples_status($parameters) {
-    // Reference of the FORM that contains the aliquots that must be updated
-    $modifAliquotsFormId = loadParam($parameters, 'reference_form');
-    /*
-     * Reference of the FORM where all all the existing aliquots will be included
-     * The aliquots modified in the FORM $modifAliquotsFormId will be stored with the new status, and the rest of a liquots will be copied from its
-     * previous status
-     */
-    $newStatusFormId = loadParam($parameters, 'status_form');
-    // Type of blood sample (WHOLE_BLOOD, PLASMA...)
-    $sampleType = strtoupper(loadParam($parameters, 'sample_type'));
-    $action = strtoupper(loadParam($parameters, 'action'));
-
-    if (!AliquotActions::isValidName($action)) {
-        throw new ServiceException("Invalid action type: '$action'");
-    }
-    $action = AliquotActions::fromName($action);
-
-    // Load the list of aliquots modified
-    $modifiedAliquotsArray = ServiceFunctions::loadAffectedAliquots($action, $modifAliquotsFormId);
-    if (empty($modifiedAliquotsArray)) {
-        return new ServiceResponse('No aliquot modified', null);
-    }
-
-    return ServiceFunctions::updateSamplesStatus($modifiedAliquotsArray, $sampleType, $newStatusFormId);
-}
-
-function track_pending_shipments($parameters) {}

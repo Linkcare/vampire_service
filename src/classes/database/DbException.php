@@ -1,21 +1,21 @@
 <?php
 
 class DbException extends Exception {
-    /** @var ErrorDescriptor */
+    /** @var DbErrorDescriptor */
     private $errorDescriptor;
     private $errorCode;
 
     /**
      *
-     * @param string|ErrorDescriptor $errorCode An error constant (e.g. DbErrors::UNEXPECTED_ERROR) or an ErrorDescriptor object
+     * @param string|DbErrorDescriptor $errorCode An error constant (e.g. DbErrors::UNEXPECTED_ERROR) or an DbErrorDescriptor object
      * @param string $message
      * @param mixed $previous
      */
     public function __construct($errorCode, $message = null, $previous = null) {
-        if ($errorCode instanceof ErrorDescriptor) {
+        if ($errorCode instanceof DbErrorDescriptor) {
             $this->errorDescriptor = $errorCode;
         } else {
-            $this->errorDescriptor = new ErrorDescriptor($errorCode, $message);
+            $this->errorDescriptor = new DbErrorDescriptor($errorCode, $message);
         }
 
         parent::__construct($this->errorDescriptor->getErrorMessage(), null, $previous);
@@ -31,7 +31,7 @@ class DbException extends Exception {
 
     /**
      *
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     public function getErrorDescriptor() {
         return $this->errorDescriptor;

@@ -1,6 +1,6 @@
 <?php
 
-class ErrorDescriptor {
+class DbErrorDescriptor {
     // Public members
     public $errCode;
     private $errMessage = "";

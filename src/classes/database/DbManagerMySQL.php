@@ -446,7 +446,7 @@ class DbManagerMySQL extends DbManager {
         $sql = "SHOW COLUMNS FROM $tableName WHERE FIELD='$columnName'";
         $rst = $this->ExecuteBindQuery($sql);
         if (!$rst->Next()) {
-            return new ErrorDescriptor(DbErrors::DATABASE_COLUMN_NOT_FOUND);
+            return new DbErrorDescriptor(DbErrors::DATABASE_COLUMN_NOT_FOUND);
         }
 
         $arrVariables = [];
@@ -492,7 +492,7 @@ class DbManagerMySQL extends DbManager {
      *
      * @param string $tableName
      * @param string $columnName
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     public function dropColumn($tableName, $columnName) {
         $sql = "ALTER TABLE $tableName DROP COLUMN $columnName";
@@ -530,7 +530,7 @@ class DbManagerMySQL extends DbManager {
      * This function always return a non-error response
      */
     public function dropSequence($sequenceName) {
-        return new ErrorDescriptor();
+        return new DbErrorDescriptor();
     }
 
     /**
@@ -539,7 +539,7 @@ class DbManagerMySQL extends DbManager {
      * @see DbManager::dropPrimaryKey()
      */
     public function dropPrimaryKey($tableName) {
-        $error = new ErrorDescriptor();
+        $error = new DbErrorDescriptor();
         if ($this->indexExists($tableName, 'PRIMARY')) {
             $error = $this->dropIndex($tableName, 'PRIMARY');
         } else {
@@ -630,6 +630,9 @@ class DbManagerMySQL extends DbManager {
 
         if (!$error->getErrCode() && !empty($schema->foreignKeys)) {
             foreach ($schema->foreignKeys as $fk) {
+                if (!$failIfExists && $this->constraintExists($fk->table, $fk->name)) {
+                    continue;
+                }
                 $error = $this->createForeignKey($fk);
                 if ($error->getErrCode()) {
                     break;
@@ -765,7 +768,7 @@ class DbManagerMySQL extends DbManager {
      * @see DbManager::createSequence()
      */
     public function createSequence($seq) {
-        return new ErrorDescriptor();
+        return new DbErrorDescriptor();
     }
 
     /**
@@ -820,7 +823,7 @@ class DbManagerMySQL extends DbManager {
             $rst = $this->ExecuteBindQuery($sql, $user);
             if ($rst->Next()) {
                 // The user already exists: no error
-                return new ErrorDescriptor();
+                return new DbErrorDescriptor();
             }
         }
         $sql = "CREATE USER '$user'@'%' IDENTIFIED BY '$password'";

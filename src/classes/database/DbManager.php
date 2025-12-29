@@ -1,6 +1,5 @@
 <?php
-require_once (__DIR__ . '/../ErrorDescriptor.php');
-
+require_once ("DbErrorDescriptor.php");
 require_once ("DbErrors.php");
 require_once ("DbException.php");
 require_once ("DbDataTypes.php");
@@ -392,7 +391,7 @@ abstract class DbManager {
 
     /**
      * Indicate whether the DB manager should throw exceptions when an error occurs or it should be handled by the caller.
-     * When an error occurs, the function getError() will always return an ErrorDescriptor object with the last error details,
+     * When an error occurs, the function getError() will always return an DbErrorDescriptor object with the last error details,
      *
      * @param boolean $throw
      */
@@ -410,16 +409,16 @@ abstract class DbManager {
     }
 
     /**
-     * Returns an ErrorDescriptor object with information about the execution of the last query
-     * Note that this function always returns a non-null ErrorDescriptor object.<br>
+     * Returns an DbErrorDescriptor object with information about the execution of the last query
+     * Note that this function always returns a non-null DbErrorDescriptor object.<br>
      * To check whether an error happened is necessary to inspect the contents of the errCode property
      *
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     final public function getError() {
-        $error = new ErrorDescriptor();
+        $error = new DbErrorDescriptor();
         if (!empty($this->errorDetails) && $this->errorDetails['code']) {
-            $error = new ErrorDescriptor(DbErrors::DATABASE_EXECUTION_ERROR);
+            $error = new DbErrorDescriptor(DbErrors::DATABASE_EXECUTION_ERROR);
             $errMsg = $this->errorDetails['code'] . ' ' . $this->errorDetails['message'];
             $error->setErrorMessage($errMsg);
         }
@@ -962,7 +961,7 @@ abstract class DbManager {
      * @param string $tableName
      * @param string $columnName
      * @param boolean $nullable
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function columnSetNullable($tableName, $columnName, $nullable);
 
@@ -981,7 +980,7 @@ abstract class DbManager {
      *
      * @param DbSchemaDefinition $schema
      * @param boolean $failIfExists (default = true) Set to false if you don't want the function to fail when the schema already exists
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function createSchema($schema, $failIfExists = true);
 
@@ -989,7 +988,7 @@ abstract class DbManager {
      * Creates a new table in the active DB Schema.
      *
      * @param DbTableDefinition $table
-     * @return ErrorDescriptor;
+     * @return DbErrorDescriptor;
      */
     abstract public function createTable($table);
 
@@ -998,7 +997,7 @@ abstract class DbManager {
      *
      * @param string $tableName
      * @param string[] $pkColumns
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function createPrimaryKey($tableName, $pkColumns);
 
@@ -1006,7 +1005,7 @@ abstract class DbManager {
      * Creates a new index on a table
      *
      * @param DbIndexDefinition $indexDef
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function createIndex($tableName, $indexDef);
 
@@ -1014,7 +1013,7 @@ abstract class DbManager {
      * Creates a foreign key on a table
      *
      * @param DbFKDefinition $fkDef
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function createForeignKey($fkDef);
 
@@ -1047,7 +1046,7 @@ abstract class DbManager {
      * @param string $user
      * @param string $password
      * @param boolean $failIfExists (default = true) Set to false if you don't want the function to fail when the user already exists
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function createUser($user, $password, $failIfExists = true);
 
@@ -1055,7 +1054,7 @@ abstract class DbManager {
      * Drops a schema
      *
      * @param string schema
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function dropSchema($schema);
 
@@ -1064,7 +1063,7 @@ abstract class DbManager {
      *
      * @param string $tableName
      * @param string $columnName
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function dropColumn($tableName, $columnName);
 
@@ -1072,7 +1071,7 @@ abstract class DbManager {
      * Drops a table
      *
      * @param string $tableName
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function dropTable($tableName);
 
@@ -1081,7 +1080,7 @@ abstract class DbManager {
      * Note that sequences are objects that exist in Oracle, but may not exist in other DM Managers like MySQL.
      *
      * @param string $sequenceName
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function dropSequence($sequenceName);
 
@@ -1089,7 +1088,7 @@ abstract class DbManager {
      * Drops the primary key of a table
      *
      * @param string $tableName
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function dropPrimaryKey($tableName);
 
@@ -1098,7 +1097,7 @@ abstract class DbManager {
      *
      * @param string $tableName
      * @param string $indexName
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function dropIndex($tableName, $indexName);
 
@@ -1107,7 +1106,7 @@ abstract class DbManager {
      *
      * @param string $tableName
      * @param string $fkName
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function dropForeignKey($tableName, $fkName);
 
@@ -1116,7 +1115,7 @@ abstract class DbManager {
      *
      * @param string $tableName
      * @param string $newTableName
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function renameTable($tableName, $newTableName);
 
@@ -1126,7 +1125,7 @@ abstract class DbManager {
      * @param string $tableName
      * @param string $columnName
      * @param string $newColumnName
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function renameColumn($tableName, $columnName, $newColumnName);
 
@@ -1136,7 +1135,7 @@ abstract class DbManager {
      * @param string $user User to whom the privileges will be granted
      * @param string $schema DB Schema over which the privileges will be granted
      * @param string $table Table over which the privileges will be granted. If null, pivileges will apply to all tables of the schema
-     * @return ErrorDescriptor
+     * @return DbErrorDescriptor
      */
     abstract public function grantDefaultPrivileges($user, $schema, $table = null);
 

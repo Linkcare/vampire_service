@@ -129,7 +129,7 @@ class DbHelper {
 
         $f = fopen($fileName, 'w');
         if (!$f) {
-            throw new DbException(new ErrorDescriptor(DbErrors::UNEXPECTED_ERROR, "Can't open file $fileName"));
+            throw new DbException(new DbErrorDescriptor(DbErrors::UNEXPECTED_ERROR, "Can't open file $fileName"));
         }
 
         try {
@@ -168,7 +168,7 @@ class DbHelper {
         } catch (DbException $e) {
             throw $e;
         } catch (Exception $e) {
-            throw new DbException(new ErrorDescriptor(DbErrors::UNEXPECTED_ERROR, $e->getMessage()));
+            throw new DbException(new DbErrorDescriptor(DbErrors::UNEXPECTED_ERROR, $e->getMessage()));
         } finally {
             fclose($f);
         }
@@ -197,7 +197,7 @@ class DbHelper {
 
         $f = fopen($filename, 'r');
         if (!$f) {
-            throw new DbException(new ErrorDescriptor(DbErrors::UNEXPECTED_ERROR, "Can't open file $filename"));
+            throw new DbException(new DbErrorDescriptor(DbErrors::UNEXPECTED_ERROR, "Can't open file $filename"));
         }
 
         $failed = false;
@@ -263,7 +263,7 @@ class DbHelper {
             throw $e;
         } catch (Exception $e) {
             $failed = true;
-            throw new DbException(new ErrorDescriptor(DbErrors::UNEXPECTED_ERROR, $e->getMessage()));
+            throw new DbException(new DbErrorDescriptor(DbErrors::UNEXPECTED_ERROR, $e->getMessage()));
         } finally {
             if ($failed) {
                 $db->rollback();

@@ -554,7 +554,7 @@ class DbManagerOracle extends DbManager {
      * @see DbManager::columnSetNullable()
      */
     public function columnSetNullable($tableName, $columnName, $nullable) {
-        $error = new ErrorDescriptor();
+        $error = new DbErrorDescriptor();
         $arrVariables[':tableName'] = $tableName;
         $arrVariables[':colName'] = $columnName;
 
@@ -570,7 +570,7 @@ class DbManagerOracle extends DbManager {
                 $error = $this->getError();
             }
         } else {
-            $error = new ErrorDescriptor(DbErrors::DATABASE_EXECUTION_ERROR);
+            $error = new DbErrorDescriptor(DbErrors::DATABASE_EXECUTION_ERROR);
         }
 
         return $error;
@@ -715,6 +715,9 @@ class DbManagerOracle extends DbManager {
         $error = $this->getError();
         if (!$error->getErrCode() && !empty($schema->tables)) {
             foreach ($schema->tables as $table) {
+                if (!$failIfExists && $this->tableExists($table->name)) {
+                    continue;
+                }
                 $error = $this->createTable($table);
                 if ($error->getErrCode()) {
                     break;
@@ -724,6 +727,9 @@ class DbManagerOracle extends DbManager {
 
         if (!$error->getErrCode() && !empty($schema->foreignKeys)) {
             foreach ($schema->foreignKeys as $fk) {
+                if (!$failIfExists && $this->constraintExists($fk->table, $fk->name)) {
+                    continue;
+                }
                 $error = $this->createForeignKey($fk);
                 if ($error->getErrCode()) {
                     break;
@@ -733,6 +739,9 @@ class DbManagerOracle extends DbManager {
 
         if (!$error->getErrCode() && count($schema->sequences) > 0) {
             foreach ($schema->sequences as $seq) {
+                if (!$failIfExists && $this->sequenceExists($seq->name)) {
+                    continue;
+                }
                 $error = $this->createSequence($seq);
                 if ($error->getErrCode()) {
                     break;
@@ -904,7 +913,7 @@ class DbManagerOracle extends DbManager {
             $rst = $this->ExecuteBindQuery($sql, $user);
             if ($rst->Next()) {
                 // The user already exists: no error
-                return new ErrorDescriptor();
+                return new DbErrorDescriptor();
             }
         }
 
@@ -923,7 +932,7 @@ class DbManagerOracle extends DbManager {
      * @see DbManager::grantDefaultPrivileges()
      */
     public function grantDefaultPrivileges($user, $schema, $table = null) {
-        $error = new ErrorDescriptor();
+        $error = new DbErrorDescriptor();
         if (!$table) {
             $privileges = ["CREATE TABLE", "UNLIMITED TABLESPACE", "CREATE SESSION"];
             foreach ($privileges as $priv) {

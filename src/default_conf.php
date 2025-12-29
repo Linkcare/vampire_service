@@ -53,23 +53,15 @@ require_once 'classes/ServiceResponse.php';
 require_once 'classes/BackgroundServiceResponse.php';
 require_once 'classes/database/DbManager.php';
 require_once 'classes/Database.php';
-require_once 'classes/DbDataModels.php';
 require_once 'WSAPI/WSAPI.php';
 require_once 'utils.php';
 
-require_once 'constants/AliquotStatus.php';
+require_once 'ShipmentFunctions/ShipmentFunctions.php';
 require_once 'constants/AliquotStatusItems.php';
 require_once 'constants/TrackingItems.php';
 require_once 'constants/AliquotTrackingItems.php';
-require_once 'constants/AliquotActions.php';
-require_once 'constants/AliquotDamage.php';
-require_once 'constants/ShipmentStatus.php';
-require_once 'constants/ReceptionStatus.php';
-require_once 'types/Shipment.php';
-require_once 'types/Aliquot.php';
 require_once 'SystemFunctions.php';
 require_once 'ServiceFunctions.php';
-require_once 'ShipmentFunctions.php';
 
 $GLOBALS['PROJECT_CODE'] = 'VAMPIRE';
 $GLOBALS['SHIPMENT_TASK_CODE'] = 'SHIPMENT_TRACKING';
