@@ -114,6 +114,8 @@ class ServiceFunctions {
             }
         }
 
+        // Remove previous Aliquots of this TASK from the database if they exist
+        ShipmentFunctions::removeAliquotsByTask($processingForm->getParentId());
         ShipmentFunctions::trackAliquots($dbRows, AliquotAuditActions::CREATED);
 
         // Concatenate the added aliquot IDs into a string

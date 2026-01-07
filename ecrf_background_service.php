@@ -4,7 +4,6 @@ error_reporting(E_ERROR); // Do not report warnings to avoid undesired character
 
 require_once $_SERVER["DOCUMENT_ROOT"] . '/vendor/autoload.php';
 use avadim\FastExcelReader\Excel;
-use MongoDB\Driver\Exception\ServerException;
 
 // Deactivate CORS for debug
 $GLOBALS['DISABLE_CORS'] = true;

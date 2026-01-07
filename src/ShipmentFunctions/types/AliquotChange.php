@@ -61,9 +61,10 @@ class AliquotChange {
     }
 
     /**
-     * Returns the aliquot information for the given aliquot ID
+     * Returns the aliquot information for the given aliquot ID included in the given bulk change
      *
-     * @param string $id
+     * @param string $bulkChangeId
+     * @param string $aliquotId
      * @return AliquotChange
      */
     static public function getInstance($bulkChangeId, $aliquotId) {
@@ -82,8 +83,10 @@ class AliquotChange {
     /**
      * Loads a batch of AliquotChange in an efficient way instead of loading them one by one
      *
+     * @param string $bulkChangeId
      * @param int[] $arrIds
-     * @return AliquotChange[]
+     * @param string $timezone
+     * @return AliquotChange[] Array of AliquotChange objects indexed by their Aliquot ID
      */
     static public function batchLoad($bulkChangeId, $arrIds, $timezone = null) {
         /*
@@ -101,9 +104,7 @@ class AliquotChange {
         $totalIds = count($arrIds);
         foreach ($arrIds as $id) {
             $ix++;
-            if ($object = self::fromCache($id)) {
-                $arrObjects[$id] = $object;
-            } elseif ($id) {
+            if ($id) {
                 $partialIds[] = $id;
             }
             if (!empty($partialIds) && (count($partialIds) == 100 || ($ix >= $totalIds))) {

@@ -78,6 +78,54 @@ class Aliquot {
     }
 
     /**
+     * Loads a batch of Aliquots in an efficient way instead of loading them one by one
+     *
+     * @param int[] $arrIds
+     * @param int $locationId
+     * @param string $timezone
+     * @return Aliquot[] array of Aliquot objects indexed by Aliquot ID
+     */
+    static public function batchLoad($arrIds, $locationId = null, $timezone = null) {
+        /*
+         * To avoid sending an extremely large query for all TaskTemplates, we will
+         * group the TaskTemplateIds in groups of 100
+         */
+        $arrObjects = [];
+        if (!$arrIds || !is_array($arrIds) || empty($arrIds)) {
+            return $arrObjects; // return an empty array
+        }
+
+        $arrIds = array_unique($arrIds);
+        $partialIds = [];
+        $ix = 0;
+        $totalIds = count($arrIds);
+        foreach ($arrIds as $id) {
+            $ix++;
+            if ($id) {
+                $partialIds[] = $id;
+            }
+            if (!empty($partialIds) && (count($partialIds) == 100 || ($ix >= $totalIds))) {
+                if ($locationId !== null) {
+                    $arrVariables = [':locationId' => $locationId];
+                    $locationCondition = "AND a.ID_LOCATION = :locationId";
+                }
+                $bindString = DbHelper::bindParamArray("id", $partialIds, $arrVariables);
+                $partialIds = [];
+                $sql = "SELECT a.* FROM ALIQUOTS a
+                        WHERE a.ID_ALIQUOT IN ($bindString) $locationCondition";
+                $rst = Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
+
+                while ($rst->Next()) {
+                    $obj = self::fromDBRecord($rst, $timezone);
+                    $arrObjects[$obj->id] = $obj;
+                }
+            }
+        }
+
+        return $arrObjects;
+    }
+
+    /**
      *
      * @param DbManagerResults $rst
      * @param string $timezone

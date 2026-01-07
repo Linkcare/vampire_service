@@ -39,14 +39,22 @@ $systemFunctions = ['deploy_service'];
 $programFunctions = ['add_aliquots'];
 $shipmentManagementFunctions = [shipment_locations, 'shipment_list', 'shipment_create', 'shipment_details', 'shippable_aliquots', 'find_aliquot',
         'shipment_add_aliquot', 'shipment_remove_aliquot', 'shipment_update', 'shipment_send', 'shipment_start_reception', 'shipment_finish_reception',
-        'shipment_delete', 'shipment_set_aliquot_condition', 'aliquot_list', 'aliquot_bulk_change', 'aliquots_report_by_patient'];
+        'shipment_delete', 'shipment_set_aliquot_condition', 'aliquot_list', 'aliquot_bulk_change', 'aliquots_report_by_patient',
+        'shipment_add_aliquots_from_file'];
 
 $publicFunctions = array_merge($systemFunctions, $programFunctions, $shipmentManagementFunctions);
 
 if (in_array($function, $publicFunctions)) {
-    $json = file_get_contents('php://input');
+    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+    /*
+     * Generally the request parameters are provided as a JSON object in the request body (content-type = application/json),
+     * but some functions are used for uploading files and the content-type is multipart/form-data.
+     * Therefore, only parse the request body as JSON when the content-type is application/json
+     */
+    $json = startsWith($contentType, 'application/json') ? file_get_contents('php://input') : null;
+
     try {
-        $parameters = json_decode($json);
+        $parameters = trim($json) ? json_decode($json) : null;
         if (trim($json) != '' && $parameters == null) {
             throw new Exception("Invalid parameters");
         }

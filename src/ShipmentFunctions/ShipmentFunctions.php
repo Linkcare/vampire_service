@@ -1,4 +1,7 @@
 <?php
+require_once $_SERVER["DOCUMENT_ROOT"] . '/vendor/autoload.php';
+use avadim\FastExcelReader\Excel;
+
 require_once 'DbDataModels.php';
 require_once 'constants/ShipmentErrorCodes.php';
 require_once 'constants/AliquotStatus.php';
@@ -103,6 +106,14 @@ class ShipmentFunctions {
 
     /**
      * Loads the list of all shipments that have been sent from or to the TEAM of the active user's session.
+     *
+     * Parameters expected ($parameters):<br/>
+     * {<br/>
+     * ··"activeLocation": 2, // Location that is related to the shipment (either as sender or receiver)<br/>
+     * ··"page": 1, // Page number (used for pagination)<br/>
+     * ··"pageSize": 25, // Number of records per page (used for pagination)<br/>
+     * ··"filters": ""<br/>
+     * }<br/>
      *
      * @param stdClass $parameters
      * @return object
@@ -326,7 +337,6 @@ class ShipmentFunctions {
         }
 
         // Mark the shipment as "Received" and indicate the datetime
-        error_log("PARAMETERS: " . json_encode($parameters));
         $shipment->trackedCopy($parameters, self::$timezone);
 
         if (!$shipment->receptionDate) {
@@ -575,26 +585,25 @@ class ShipmentFunctions {
     /**
      * Changes the properties of multiple aliquots at once.
      *
+     * Parameters expected in $parameters:<br/>
+     * {
+     * ··"changeDate": "yyyy-mm-dd hh:nn:ss", // Expected to be in the local timezone of the active user<br/>
+     * ··"changedById": "xxxxxxx",<br/>
+     * ··"changedBy": "Full Name",<br/>
+     * ··"comments": "",<br/>
+     * ··"aliquots": [<br/>
+     * ····{<br/>
+     * ····"id" : "xxxxxxx",<br/>
+     * ····"statusId": "REJECTED",<br/>
+     * ····"conditionId": "DEFROST"<br/>
+     * ····}<br/>
+     * ··]<br/>
+     * }<br/>
+     *
      * @param stdClass $parameters
-     * @return object
+     * @return string Bulk change identifier
      */
     static public function aliquot_bulk_change($parameters) {
-        /*
-         * Params expected:
-         * {
-         * ··"changeDate": "yyyy-mm-dd hh:nn:ss", // Expected to be in the local timezone of the active user
-         * ··"changedById": "xxxxxxx",
-         * ··"changedBy": "Full Name",
-         * ··"comments": "",
-         * ··"aliquots": [
-         * ····{
-         * ····"id" : "xxxxxxx",
-         * ····"statusId": "REJECTED",
-         * ····"conditionId": "DEFROST"
-         * ····}
-         * ··]
-         * }
-         */
         if ($changeDate = loadParam($parameters, 'changeDate')) {
             if (!DateHelper::isValidDate($changeDate)) {
                 throw new ShipmentException(ShipmentErrorCodes::INVALID_DATA_FORMAT, "Invalid change date: " . $parameters->changeDate);
@@ -712,14 +721,41 @@ class ShipmentFunctions {
     /**
      * Adds an aliquot to a shipment.
      *
+     * The function fails if the aliquot doesn't exist in the specified location, if it is not in AVAILABLE status,
+     * or if the shipment is not in PREPARING status.<br/>
+     * <br/>
+     * Parameters expected in $parameters:<br/>
+     * {
+     * ··"shipmentId": "sssssss",<br/>
+     * ··"aliquotId": "xxxxxxx",<br/>
+     * ··"locationId": 2 // Identifier of the current location of the aliquot<br/>
+     * }<br/>
+     *
      * @param stdClass $params
      */
     static public function shipment_add_aliquot($params) {
         $shipmentId = loadParam($params, 'shipmentId');
         $aliquotId = loadParam($params, 'aliquotId');
+        $locationId = loadParam($params, 'locationId');
 
-        if (!Shipment::exists($shipmentId)) {
+        $shipment = Shipment::exists($shipmentId);
+        if (!$shipment) {
             throw new ShipmentException(ShipmentErrorCodes::NOT_FOUND, "Shipment with ID $shipmentId not found");
+        }
+        if ($shipment->statusId != ShipmentStatus::PREPARING) {
+            throw new ShipmentException(ShipmentErrorCodes::FORBIDDEN_OPERATION, "Shipment with ID is not available for adding aliquots");
+        }
+
+        $aliquot = Aliquot::getInstance($aliquotId);
+        if (!$aliquot) {
+            throw new ShipmentException(ShipmentErrorCodes::NOT_FOUND, "Aliquot with ID $aliquotId not found");
+        }
+        if ($aliquot->locationId != $locationId) {
+            throw new ShipmentException(ShipmentErrorCodes::NOT_FOUND, "Aliquot with ID $aliquotId not found in location with ID $locationId");
+        }
+        if ($aliquot->statusId != AliquotStatus::AVAILABLE) {
+            throw new ShipmentException(ShipmentErrorCodes::INVALID_STATUS, "Aliquot with ID $aliquotId is in status " . $aliquot->statusId .
+                    " that does not allow adding it to a shipment");
         }
 
         $arrVariables = [':shipmentId' => $shipmentId, ':aliquotId' => $aliquotId];
@@ -732,6 +768,112 @@ class ShipmentFunctions {
         Database::getInstance()->executeBindQuery($sql, $arrVariables);
 
         return $aliquotId;
+    }
+
+    /**
+     * Adds multiple aliquots to a shipment from an uploaded Excel file.
+     *
+     * @param stdClass $params Unused parameter, data is taken from $_POST and $_FILES
+     * @return stdClass
+     */
+    static public function shipment_add_aliquots_from_file($params) {
+        if (!isset($_FILES["file"])) {
+            throw new ShipmentException(ShipmentErrorCodes::DATA_MISSING, "Missing Excel file");
+        }
+
+        $params = json_decode($_POST["metadata"] ?? null);
+        if (!$params) {
+            throw new ShipmentException(ShipmentErrorCodes::INVALID_JSON, "Missing parameters");
+        }
+
+        $shipmentId = loadParam($params, 'shipmentId');
+        $locationId = loadParam($params, 'locationId');
+
+        $shipment = Shipment::exists($shipmentId);
+        if (!$shipment) {
+            throw new ShipmentException(ShipmentErrorCodes::NOT_FOUND, "Shipment with ID $shipmentId not found");
+        }
+        if ($shipment->statusId != ShipmentStatus::PREPARING) {
+            throw new ShipmentException(ShipmentErrorCodes::FORBIDDEN_OPERATION, "Shipment with ID is not available for adding aliquots");
+        }
+
+        $file = $_FILES["file"];
+
+        // File information
+        $filename = $file["name"];
+        $tmpPath = $file["tmp_name"];
+        $size = $file["size"];
+        $error = $file["error"];
+
+        if ($error !== UPLOAD_ERR_OK) {
+            throw new ShipmentException(ShipmentErrorCodes::UNEXPECTED_ERROR, "Error uploading file (code $error)");
+        }
+
+        try {
+            $excel = Excel::open($tmpPath);
+        } catch (Exception $e) {
+            throw new ShipmentException(ShipmentErrorCodes::INVALID_DATA_FORMAT, "Error opening Excel file: $filename: " . $e->getMessage());
+        }
+
+        $sheet = $excel->sheet(0);
+        if (!$sheet) {
+            throw new ServiceException("Sheet 'Datos' not found in file: $filename");
+        }
+
+        $aliquotIdColumnKey = null;
+        $aliquotIds = [];
+        foreach ($sheet->nextRow([], Excel::KEYS_FIRST_ROW) as $rowNum => $rowData) {
+            if (!$aliquotIdColumnKey) {
+                foreach (array_keys($rowData) as $key) {
+                    if (trim(strtolower($key)) == 'id_aliquot') {
+                        $aliquotIdColumnKey = $key;
+                        break;
+                    }
+                }
+                if (!$aliquotIdColumnKey) {
+                    throw new ShipmentException(ShipmentErrorCodes::INVALID_DATA_FORMAT, "ALIQUOT_ID column not found in file $filename");
+                }
+            }
+            $aliquotIds[] = $rowData[$aliquotIdColumnKey];
+        }
+        $aliquotIds = array_unique(array_filter($aliquotIds));
+
+        $aliquots = Aliquot::batchLoad($aliquotIds, $locationId);
+        $missing = [];
+        $alreadyAdded = [];
+        $validAliquotIds = [];
+        foreach ($aliquotIds as $aliquotId) {
+            $aliquot = $aliquots[$aliquotId] ?? null;
+            if (!$aliquot) {
+                /* Inform about the missing aliquots */
+                $missing[] = $aliquotId;
+            } elseif ($aliquot->statusId != AliquotStatus::AVAILABLE) {
+                if ($aliquot->statusId == AliquotStatus::IN_TRANSIT && $aliquot->shipmentId == $shipmentId) {
+                    /* Inform about the aliquots already added to the shipment */
+                    $alreadyAdded[] = $aliquotId;
+                } else {
+                    /* Inform that the Aliquot is not available for including in the selected shipment */
+                    $missing[] = $aliquotId;
+                }
+            } else {
+                $validAliquotIds[] = $aliquotId;
+                $arrVariables = [':shipmentId' => $shipmentId, ':aliquotId' => $aliquotId];
+                $sql = "INSERT INTO SHIPPED_ALIQUOTS (ID_SHIPMENT, ID_ALIQUOT) VALUES (:shipmentId, :aliquotId)";
+                Database::getInstance()->executeBindQuery($sql, $arrVariables);
+
+                // Update also the current status of the aliquot
+                $arrVariables = [':shipmentId' => $shipmentId, ':aliquotId' => $aliquotId, ':statusId' => AliquotStatus::IN_TRANSIT];
+                $sql = "UPDATE ALIQUOTS SET ID_STATUS = :statusId, ID_SHIPMENT=:shipmentId WHERE ID_ALIQUOT = :aliquotId";
+                Database::getInstance()->executeBindQuery($sql, $arrVariables);
+            }
+        }
+
+        $data = new stdClass();
+        $data->added = $validAliquotIds;
+        $data->not_found = $missing;
+        $data->ignored = $alreadyAdded;
+
+        return $data;
     }
 
     /**
@@ -765,8 +907,12 @@ class ShipmentFunctions {
         $shipmentId = loadParam($params, 'shipmentId');
         $aliquotId = loadParam($params, 'aliquotId');
 
-        if (!Shipment::exists($shipmentId)) {
+        $shipment = Shipment::exists($shipmentId);
+        if (!$shipment) {
             throw new ShipmentException(ShipmentErrorCodes::NOT_FOUND, "Shipment with ID $shipmentId not found");
+        }
+        if ($shipment->statusId != ShipmentStatus::PREPARING) {
+            throw new ShipmentException(ShipmentErrorCodes::FORBIDDEN_OPERATION, "Shipment with ID is not available for removing aliquots");
         }
 
         $arrVariables = [':shipmentId' => $shipmentId, ':aliquotId' => $aliquotId];
@@ -840,6 +986,16 @@ class ShipmentFunctions {
                         VALUES (:id_aliquot, :id_task, :action, :id_location, :id_status, :id_aliquot_condition, :aliquot_updated, :id_shipment, :record_timestamp)";
             Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
         }
+    }
+
+    /**
+     * Removes all the aliquots associated to a specific eCRF Task.
+     *
+     * @param string $taskId
+     */
+    static function removeAliquotsByTask($taskId) {
+        $sql = "DELETE FROM ALIQUOTS WHERE ID_TASK = :taskId";
+        Database::getInstance()->ExecuteBindQuery($sql, [':taskId' => $taskId]);
     }
 
     /**
