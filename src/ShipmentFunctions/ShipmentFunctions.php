@@ -119,13 +119,24 @@ class ShipmentFunctions {
      * @return object
      */
     static public function shipment_list($parameters) {
-        $activeTeamId = loadParam($parameters, 'activeLocation');
+        $locationId = loadParam($parameters, 'activeLocation');
         $page = loadParam($parameters, 'page');
         $pageSize = loadParam($parameters, 'pageSize');
         $filters = loadParam($parameters, 'filters');
         cleanFilters($filters);
 
-        $arrVariables[':activeTeamId'] = $activeTeamId ? $activeTeamId : self::$activeLocation;
+        $multipleLocations = explode(',', $locationId);
+        $locationCondition = "";
+        if (count($multipleLocations) > 1) {
+            $arrVariables = [];
+            $condition = DbHelper::bindParamArray('locationId', $multipleLocations, $arrVariables);
+            $locationCondition = "(s.ID_SENT_FROM IN ($condition) OR (s.ID_SENT_TO IN ($condition) AND s.ID_STATUS <> :statusPreparing))";
+        } else {
+            $locationCondition = "(s.ID_SENT_FROM=:locationId OR (s.ID_SENT_TO=:locationId AND s.ID_STATUS <> :statusPreparing))";
+            $arrVariables = [':locationId' => $locationId];
+        }
+
+        $arrVariables[':activeTeamId'] = $locationId ? $locationId : self::$activeLocation;
         $arrVariables[':statusPreparing'] = ShipmentStatus::PREPARING;
 
         $filterConditions = [];
@@ -149,7 +160,7 @@ class ShipmentFunctions {
         $queryFromClause = "FROM SHIPMENTS s
                 LEFT JOIN LOCATIONS l1 ON s.ID_SENT_FROM = l1.ID_LOCATION
                 LEFT JOIN LOCATIONS l2 ON s.ID_SENT_TO = l2.ID_LOCATION
-            WHERE (s.ID_SENT_FROM=:activeTeamId OR (s.ID_SENT_TO=:activeTeamId AND s.ID_STATUS <> :statusPreparing)) $filterSql";
+            WHERE $locationCondition $filterSql";
         list($rst, $totalRows) = self::fetchWithPagination($queryColumns, $queryFromClause, $arrVariables, $pageSize, $page);
 
         $shipmentList = [];
@@ -528,7 +539,16 @@ class ShipmentFunctions {
         $filters = loadParam($parameters, 'filters');
         cleanFilters($filters);
 
-        $arrVariables = [':locationId' => $locationId];
+        $multipleLocations = explode(',', $locationId);
+        $locationCondition = "";
+        if (count($multipleLocations) > 1) {
+            $arrVariables = [];
+            $condition = DbHelper::bindParamArray('locationId', $multipleLocations, $arrVariables);
+            $locationCondition = "a.ID_LOCATION IN ($condition)";
+        } else {
+            $locationCondition = "a.ID_LOCATION = :locationId";
+            $arrVariables = [':locationId' => $locationId];
+        }
 
         $filterConditions = [];
         if ($filters && property_exists($filters, 'aliquotId') && $filters->aliquotId) {
@@ -563,7 +583,7 @@ class ShipmentFunctions {
 
         $queryColumns = "a.* , l.NAME AS LOCATION_NAME";
         $queryFromClause = "FROM ALIQUOTS a LEFT JOIN LOCATIONS l ON a.ID_LOCATION = l.ID_LOCATION
-                        WHERE a.ID_LOCATION = :locationId $filterSql";
+                        WHERE $locationCondition $filterSql";
         list($rst, $totalRows) = self::fetchWithPagination($queryColumns, $queryFromClause, $arrVariables, $pageSize, $page);
 
         $available = [];
@@ -836,7 +856,14 @@ class ShipmentFunctions {
             }
             $aliquotIds[] = $rowData[$aliquotIdColumnKey];
         }
-        $aliquotIds = array_unique(array_filter($aliquotIds));
+
+        $aliquotIds = array_filter($aliquotIds);
+
+        // Check for duplicate aliquot IDs in the uploaded file
+        $countDuplicates = array_count_values($aliquotIds);
+        $duplicates = array_keys(array_filter($countDuplicates, fn ($numOccurrences) => $numOccurrences > 1));
+
+        $aliquotIds = array_unique($aliquotIds);
 
         $aliquots = Aliquot::batchLoad($aliquotIds, $locationId);
         $missing = [];
@@ -872,6 +899,7 @@ class ShipmentFunctions {
         $data->added = $validAliquotIds;
         $data->not_found = $missing;
         $data->ignored = $alreadyAdded;
+        $data->duplicates = $duplicates;
 
         return $data;
     }
