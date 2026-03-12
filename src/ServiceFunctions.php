@@ -129,7 +129,7 @@ class ServiceFunctions {
      * @throws ServiceException|APIException
      * @return APIAdmission
      */
-    static function findAdmission($patientId) {
+    static public function findAdmission($patientId) {
         $api = LinkcareSoapAPI::getInstance();
 
         $patientAdmissions = $api->case_admission_list($patientId);
@@ -727,7 +727,7 @@ class ServiceFunctions {
      * @param string $questionType Type of the question to be modified (optional. Only necessary if the question is going to be created)
      * @return APIQuestion
      */
-    static private function updateTextQuestionValue($form, $itemCode, $value, $create = false, $questionType = null) {
+    static public function updateTextQuestionValue($form, $itemCode, $value, $create = false, $questionType = null) {
         if ($q = $form->findQuestion($itemCode)) {
             $q->setAnswer($value);
         } elseif ($create) {
@@ -750,7 +750,7 @@ class ServiceFunctions {
      * @param bool $create If true, the question will be created if it does not exist
      * @return APIQuestion
      */
-    static private function updateArrayTextQuestionValue($form, $arrayRef, $row, $itemCode, $value, $create = true) {
+    static public function updateArrayTextQuestionValue($form, $arrayRef, $row, $itemCode, $value, $create = true) {
         if ($q = $form->findArrayQuestion($arrayRef, $row, $itemCode, $create)) {
             $q->setAnswer($value);
         } else {
@@ -772,7 +772,7 @@ class ServiceFunctions {
      * @param string $questionType Type of the question to be modified (optional. Only necessary if the question is going to be created)
      * @return APIQuestion
      */
-    static private function updateOptionQuestionValue($form, $itemCode, $optionId, $optionValues = null, $create = false, $questionType = null) {
+    static public function updateOptionQuestionValue($form, $itemCode, $optionId, $optionValues = null, $create = false, $questionType = null) {
         $ids = is_array($optionId) ? implode('|', $optionId) : $optionId;
         $values = is_array($optionValues) ? implode('|', $optionValues) : $optionValues;
 
@@ -799,7 +799,7 @@ class ServiceFunctions {
      * @param bool $create If true, the question will be created if it does not exist
      * @return APIQuestion
      */
-    static private function updateArrayOptionQuestionValue($form, $arrayRef, $row, $itemCode, $optionId, $optionValues = null, $create = true) {
+    static public function updateArrayOptionQuestionValue($form, $arrayRef, $row, $itemCode, $optionId, $optionValues = null, $create = true) {
         $ids = is_array($optionId) ? implode('|', $optionId) : $optionId;
         $values = is_array($optionValues) ? implode('|', $optionValues) : $optionValues;
 

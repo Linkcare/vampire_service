@@ -394,9 +394,12 @@ class APITask {
     }
 
     /**
+     * Saves the TASK properties if it has been modified or if the $force parameter is set to true
+     *
+     * @param boolean $force
      */
-    public function save() {
-        if ($this->modified) {
+    public function save($force = false) {
+        if ($this->modified || $force) {
             $this->api->task_set($this);
         }
     }

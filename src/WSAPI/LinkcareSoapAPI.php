@@ -1000,6 +1000,16 @@ class LinkcareSoapAPI {
      * @param int $formId
      * @throws APIException
      */
+    public function form_delete($formId) {
+        $params = ['form' => $formId];
+        $this->invoke('form_delete', $params);
+    }
+
+    /**
+     *
+     * @param int $formId
+     * @throws APIException
+     */
     public function form_close($formId) {
         $params = ['form' => $formId];
         $this->invoke('form_close', $params);

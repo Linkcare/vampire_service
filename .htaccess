@@ -7,6 +7,6 @@ Options -Indexes
 RewriteEngine on
 RewriteRule ^ecrf_service/(.*)$ ecrf_background_service.php?function=$1 [QSA,L]
 
-RewriteCond %{REQUEST_URI} !^/services/vampire_service/(ecrf_background_service|deploy_service|rest_service)\.php$
+RewriteCond %{REQUEST_URI} !^/services/vampire_service/(ecrf_background_service|retrospective_import|deploy_service|rest_service)\.php$
 RewriteRule ^(.*)$ rest_service.php?function=$1 [QSA,L]
 </IfModule>
