@@ -25,6 +25,7 @@ try {
     // The public rest function invoked from the Linkcare Platform's PROGRAM must be executed in a service session
     $apiSession = initServiceSession();
     import_files();
+    $logger->info("Data import finished successfully");
 } catch (Exception $e) {
     $logger->error("General exception: " . $e->getMessage());
 } catch (Error $e) {
