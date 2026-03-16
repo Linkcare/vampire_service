@@ -657,6 +657,10 @@ class ServiceFunctions {
     static public function updateBloodProcessingData($bpForm, $aliquotsData) {
         $api = LinkcareSoapAPI::getInstance();
 
+        if ($bpForm->getStatus() == APIForm::STATUS_CLOSED) {
+            $bpForm->open();
+        }
+
         // Fill the aliquot arrays of the TASK with the IDs of the aliquots provided
         $sampleTypesList = ['WHOLE_BLOOD', 'PLASMA', 'PBMC', 'SERUM'];
         $updatedQuestions = [];

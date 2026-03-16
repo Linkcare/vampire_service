@@ -315,18 +315,23 @@ function import_blood_processing_data($parameters) {
                 foreach (array_values($patientSamples['samples']) as $ids) {
                     $aliquotIds = array_merge($aliquotIds, $ids);
                 }
-                if (count($aliquotIds) == count(Aliquot::findAliquots($aliquotIds))) {
+                $alreadyExisting = Aliquot::findAliquots($aliquotIds);
+                if (count($aliquotIds) == count($alreadyExisting)) {
                     // All aliquots already exist. No need to import
                     $msg = "Aliquots of sample $displayName already loaded. Data skipped.";
                     $serviceResponse->addDetails($msg);
                     ServiceLogger::getInstance()->info($msg);
                     $numSkipped++;
                     continue;
+                } elseif (count($alreadyExisting) > 0) {
+                    $msg = "Aliquots of sample $displayName modified (previous import had " . count($alreadyExisting) . " aliquots). Now: " .
+                            count($aliquotIds);
+                } else {
+                    $msg = "Sample $displayName: Imported successfully (" . count($aliquotIds) . " aliquots)";
                 }
 
                 ServiceFunctions::updateBloodProcessingData($bpForm, $patientSamples['samples']);
 
-                $msg = "Sample $displayName: Imported successfully.";
                 $serviceResponse->addDetails($msg);
                 ServiceLogger::getInstance()->info($msg);
                 $numSuccessful++;
