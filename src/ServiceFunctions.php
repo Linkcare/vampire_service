@@ -39,9 +39,11 @@ class ServiceFunctions {
         $localTime = DateHelper::compose($procDate, $procTime);
         $procDateUTC = DateHelper::localToUTC($localTime, $api->getSession()->getTimezone());
 
-        $aliquotsIncluded = [];
-
+        $aliquotIds = [];
         $dbRows = [];
+        $localDuplicateIds = [];
+        $globalDuplicateIds = [];
+
         foreach ($sampleTypesList as $sampleType) {
             $statusFormCode = $sampleType . '_STATUS_FORM';
             // Check if there are aliquots of this sample type
@@ -83,6 +85,23 @@ class ServiceFunctions {
                 $dbColumns = [];
                 /** @var APIQuestion[] $row */
                 $aliquotId = $row[$sampleType . "_" . AliquotTrackingItems::ID]->getValue();
+                if (in_array($aliquotId, $aliquotIds)) {
+                    /*
+                     * There is a repeated aliquot ID in the input data. This should not happen, as the aliquot IDs must be unique.
+                     * We will skip this entry to avoid errors when updating the status form and the database, but we will log it as a warning.
+                     */
+                    $localDuplicateIds[] = $aliquotId;
+                    continue;
+                } elseif ($aliquot = Aliquot::getInstance($aliquotId)) {
+                    if ($aliquot->taskId != $processingForm->getParentId()) {
+                        /*
+                         * ERROR: The aliquot already exists in another TASK. This should not happen, as the aliquot IDs must be unique across all the
+                         * TASKS of the eCRF
+                         */
+                        $globalDuplicateIds[] = ['id' => $aliquotId, 'taskId' => $aliquot->taskId, 'patient' => $aliquot->patientRef];
+                    }
+                    continue;
+                }
                 $aliquotIds[] = $aliquotId;
                 $dbColumns['ID_ALIQUOT'] = $aliquotId;
                 $dbColumns['ID_PATIENT'] = $patientId;
@@ -120,7 +139,31 @@ class ServiceFunctions {
 
         // Concatenate the added aliquot IDs into a string
         $aliquotsIncluded = implode(',', $aliquotIds);
-        return new ServiceResponse($aliquotsIncluded, null);
+
+        $response = new ServiceResponse($aliquotsIncluded, null);
+
+        if (!empty($localDuplicateIds) || !empty($globalDuplicateIds)) {
+            /* There exists duplicated Aliquot IDs. Send a warning eMail to tech support */
+            $subject = "Patient $patientRef has duplicated Aliquot Ids";
+            $body = "Patient: <b>$patientRef</b><br/><br/>";
+            $body .= "The Blood Processing Data form (Form ID: " . $processingForm->getId() . ", Task Id. " . $processingForm->getParentId() .
+                    ") contains duplicated aliquot Ids<br/><br/>";
+            if (!empty($localDuplicateIds)) {
+                $body .= "IDs duplicated within the same form: " . implode(", ", $localDuplicateIds) . ".<br/><br/>";
+            }
+            if (!empty($globalDuplicateIds)) {
+                $body .= "IDs duplicated in other forms:<br>";
+                $body .= implode("<br/>",
+                        array_map(
+                                function ($dup) {
+                                    return "- " . $dup['id'] . ", Task ID: " . $dup['taskId'] . ", Patient: " . $dup['patient'] . "<br/>";
+                                }, $globalDuplicateIds));
+                $body .= "<br/><br/>";
+            }
+            $response->setEmailCommunication($subject, $body);
+        }
+
+        return $response;
     }
 
     /**

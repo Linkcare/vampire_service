@@ -6,6 +6,7 @@ session_start();
  * To override the default values defined below, create a file named conf/configuration.php in the service root directory and replace the value of the
  * desired variables by a custom value
  */
+$GLOBALS['SERVICE_NAME'] = "VAMPIRE";
 $GLOBALS['WS_LINK'] = "https://vampire-api.linkcareapp.com/ServerWSDL.php";
 $GLOBALS['SERVICE_USER'] = 'vampire_service';
 $GLOBALS['SERVICE_PASSWORD'] = 'xxxxxx';
@@ -37,6 +38,10 @@ $GLOBALS['LOG_DIR'] = null;
  * ** REQUIRED CONFIGURATION PARAMETERS ***
  */
 
+// This service assumes that it is executing in an environment with PHP and Composer installed. The following line is required to load the
+// dependencies defined in the composer.json file
+require_once $_SERVER["DOCUMENT_ROOT"] . '/vendor/autoload.php';
+
 /* LOAD CUSTOMIZED CONFIGURATION */
 if (file_exists(__DIR__ . '/../conf/configuration.php')) {
     include_once __DIR__ . '/../conf/configuration.php';
@@ -53,6 +58,7 @@ require_once 'classes/ServiceResponse.php';
 require_once 'classes/BackgroundServiceResponse.php';
 require_once 'classes/database/DbManager.php';
 require_once 'classes/Database.php';
+require_once 'classes/SMTPMailer.php';
 require_once 'WSAPI/WSAPI.php';
 require_once 'utils.php';
 
@@ -71,4 +77,4 @@ $GLOBALS['SHIPMENT_TRACKING_FORM'] = 'SHIPMENT_TRACKING_FORM';
 
 date_default_timezone_set($GLOBALS['DEFAULT_TIMEZONE']);
 
-$GLOBALS['VERSION'] = '1.5';
+$GLOBALS['VERSION'] = '1.6';

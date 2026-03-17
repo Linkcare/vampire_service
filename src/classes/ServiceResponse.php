@@ -5,6 +5,8 @@ class ServiceResponse {
     private $result;
     /** @var string */
     private $error;
+    private $emailSubject;
+    private $emailBody;
 
     public function __construct($result, $error) {
         $this->result = $result;
@@ -58,5 +60,18 @@ class ServiceResponse {
         $serviceResponse->result = $this->result;
         $serviceResponse->error = $this->error;
         return json_encode($serviceResponse);
+    }
+
+    public function setEmailCommunication($subject, $body) {
+        $this->emailSubject = $subject;
+        $this->emailBody = $body;
+    }
+
+    public function getEmailSubject() {
+        return $this->emailSubject;
+    }
+
+    public function getEmailBody() {
+        return $this->emailBody;
     }
 }

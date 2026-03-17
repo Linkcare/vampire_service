@@ -83,7 +83,7 @@ if (in_array($function, $publicFunctions)) {
         if (Database::getInstance()) {
             Database::getInstance()->rollback();
         }
-        $logger->error("Service Exception: " . $e->getErrorMessage());
+        $logger->error("Shipment Exception: " . $e->getErrorMessage());
         $serviceResponse = new ServiceResponse(null, $e->getErrorMessage());
     } catch (Exception $e) {
         if (Database::getInstance()) {
@@ -103,6 +103,22 @@ if (in_array($function, $publicFunctions)) {
     }
 } else {
     $serviceResponse = new ServiceResponse(null, "Function $function not implemented");
+}
+
+$notifiableFunctions = ['add_aliquots'];
+if ($serviceResponse->getError() && in_array($function, $notifiableFunctions)) {
+    $body = $serviceResponse->getError();
+    if ($parameters && property_exists($parameters, 'session')) {
+        // Remove property session to avoid sharing sensitive information in the email
+        unset($parameters->session);
+    }
+    $body .= "<br/><br/>REST call parameters: " . json_encode($parameters);
+    $serviceResponse->setEmailCommunication("Error executing $function function", $body);
+}
+
+if ($serviceResponse->getEmailBody()) {
+    // The response indicates that a mail shoulb be sent to the tech support with the provided subject and body
+    sendEmail($serviceResponse->getEmailSubject(), $serviceResponse->getEmailBody());
 }
 
 echo $serviceResponse->toString();

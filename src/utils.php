@@ -209,3 +209,23 @@ function cleanFilters($filters) {
         }
     }
 }
+
+function sendEmail($subject, $body) {
+    if (empty($subject) || empty($body)) {
+        return;
+    }
+    /* There exists duplicated Aliquot IDs. Send a warning eMail to tech support */
+    $subject = $subject ?? "Service Alert";
+    $subject = $GLOBALS['SERVICE_NAME'] . " service notification: $subject";
+
+    $headerLines[] = "<b><u>" . $GLOBALS['SERVICE_NAME'] . " Service</u></b>";
+    $headerLines[] = "REST Call: " . $_SERVER['REQUEST_URI'];
+    $headerLines[] = "Date/Time (UTC): " . DateHelper::currentDate();
+
+    $body = implode("<br/>", $headerLines) . "<br/><br/>$body";
+
+    try {
+        $mail = new SMTPMailer($GLOBALS['TECH_SUPPORT_EMAIL'], $subject, $body, null);
+        $mail->send();
+    } catch (Exception $e) {}
+}
