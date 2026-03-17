@@ -99,8 +99,8 @@ class ServiceFunctions {
                          * TASKS of the eCRF
                          */
                         $globalDuplicateIds[] = ['id' => $aliquotId, 'taskId' => $aliquot->taskId, 'patient' => $aliquot->patientRef];
+                        continue;
                     }
-                    continue;
                 }
                 $aliquotIds[] = $aliquotId;
                 $dbColumns['ID_ALIQUOT'] = $aliquotId;
