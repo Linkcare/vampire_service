@@ -812,7 +812,7 @@ class DbManagerOracle extends DbManager {
         // ALTER TABLE "table_name" ADD CONSTRAINT "constraint_name" PRIMARY KEY ("col1", "col2");
         $pkDef = array_map(function ($colName) {
             return '"' . $colName . '"';
-        }, $pkColumns);
+        }, $pkColumns ?? []);
         $pkName = $tableName . '_PK';
         $sql = 'ALTER TABLE "' . $tableName . '" ADD CONSTRAINT ' . $pkName . ' PRIMARY KEY (' . implode(',', $pkDef) . ')';
         $this->ExecuteQuery($sql);
@@ -833,7 +833,7 @@ class DbManagerOracle extends DbManager {
                         return "SUBSTR(" . $matches[1] . ",1," . $matches[2] . ")";
                     }
                     return '"' . $colName . '"';
-                }, $indexDef->columns);
+                }, $indexDef->columns ?? []);
         $unique = $indexDef->unique ? 'UNIQUE' : '';
         $sql = "CREATE $unique INDEX \"" . $indexDef->name . '" ON "' . $tableName . '" (' . implode(',', $ixCols) . ")";
         $this->ExecuteQuery($sql);
@@ -849,10 +849,10 @@ class DbManagerOracle extends DbManager {
         // ALTER TABLE "table" ADD CONSTRAINT "fk_name" FOREIGN KEY ("col1", "col2") REFERENCES "referenced_table" ("col1", "col2") ON DELETE CASCADE;
         $cols = array_map(function ($colName) {
             return '"' . $colName . '"';
-        }, $fkDef->columnNames);
+        }, $fkDef->columnNames ?? []);
         $refCols = array_map(function ($colName) {
             return '"' . $colName . '"';
-        }, $fkDef->referencedColumnNames);
+        }, $fkDef->referencedColumnNames ?? []);
         $sql = 'ALTER TABLE "' . $fkDef->table . '" ADD CONSTRAINT "' . $fkDef->name . '" FOREIGN KEY (' . implode(',', $cols) . ') REFERENCES "' .
                 $fkDef->referencedTable . '" (' . implode(',', $refCols) . ")";
         if ($fkDef->onDeleteCascade) {

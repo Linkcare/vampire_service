@@ -579,7 +579,7 @@ abstract class DbManager {
      * @param string[] $arrVariables
      */
     protected function removeUnusedVariables($query, &$arrVariables) {
-        if ($arrVariables === null) {
+        if ($arrVariables === null || !is_array($arrVariables)) {
             return;
         }
         $names = array_keys($arrVariables);

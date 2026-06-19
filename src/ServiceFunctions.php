@@ -19,6 +19,7 @@ class ServiceFunctions {
         // Load the FORM that contains the new processed aliquots that must be added
         $processingForm = $api->form_get_summary($bloodProcessingFormId);
         $containerTaskActivities = $api->task_activity_list($processingForm->getParentId());
+        $forms = [];
         foreach ($containerTaskActivities as $taskActivity) {
             if (!$taskActivity instanceof APIForm) {
                 continue;
@@ -502,6 +503,7 @@ class ServiceFunctions {
         list($samplesStatusForm, $aliquotStatusArray) = self::loadAliquotStatus($statusForm, AliquotStatus::ALL, null);
 
         $updatableFieldMap = [];
+        $modifiedAliquotsArray = $modifiedAliquotsArray ?? [];
 
         $nowUTC = DateHelper::currentDate();
         foreach ($modifiedAliquotsArray as $aliquotId => $modififedAliquot) {
@@ -784,6 +786,43 @@ class ServiceFunctions {
     }
 
     /**
+     *
+     * @param APIAdmission $admission
+     * @param string $taskCode
+     * @param string $formCode
+     * @param string[] $itemCodes List of the ITEM_CODES that must be included in the export.
+     * @return string[] array with the list FORMS. Each element of the array is an associative array with list of ITEMS of a FORM the following
+     *         structure:<br>
+     *         follows: [<br>
+     *         ··'task_id' => taskId,<br>
+     *         ··'task_date' => 'yyyy-mm-dd hh:nn:ss',<br>
+     *         ··'form_id' => formId,<br>
+     *         ··'ITEM_CODE1' => value1,<br>
+     *         ··'ITEM_CODE2' => value2,<br>
+     *         ...
+     *         ··]<br>
+     *         ]
+     */
+    static public function exportFormData($admission, $task, $formCode, $itemCodes) {
+        // Find the task with the specified code
+        $exportedData = [];
+        foreach ($task->findForm($formCode) as $form) {
+            $formData = ['task_id' => $task->getId(), 'task_date' => $task->getDateTime(), 'form_id' => $form->getId()];
+            foreach ($itemCodes as $itemCode) {
+                $question = $form->findQuestion($itemCode);
+                if ($question) {
+                    $formData[$itemCode] = self::formatItemForExport($question);
+                } else {
+                    $formData[$itemCode] = null;
+                }
+            }
+            $exportedData[] = $formData;
+        }
+
+        return $exportedData;
+    }
+
+    /**
      * Load the array of blood samples from the Form that contains the last known status of the blood samples
      *
      * @param string|APIForm $formReference
@@ -874,11 +913,8 @@ class ServiceFunctions {
      * @return APIQuestion
      */
     static public function updateOptionQuestionValue($form, $itemCode, $optionId, $optionValues = null, $create = false, $questionType = null) {
-        $ids = is_array($optionId) ? implode('|', $optionId) : $optionId;
-        $values = is_array($optionValues) ? implode('|', $optionValues) : $optionValues;
-
         if ($q = $form->findQuestion($itemCode)) {
-            $q->setOptionAnswer($ids, $values);
+            $q->setOptionAnswer($optionId, $optionValues);
         } elseif ($create) {
             $q = new APIQuestion($itemCode, $values, $ids, $questionType);
         } else {
@@ -901,11 +937,8 @@ class ServiceFunctions {
      * @return APIQuestion
      */
     static public function updateArrayOptionQuestionValue($form, $arrayRef, $row, $itemCode, $optionId, $optionValues = null, $create = true) {
-        $ids = is_array($optionId) ? implode('|', $optionId) : $optionId;
-        $values = is_array($optionValues) ? implode('|', $optionValues) : $optionValues;
-
         if ($q = $form->findArrayQuestion($arrayRef, $row, $itemCode, $create)) {
-            $q->setOptionAnswer($ids, $values);
+            $q->setOptionAnswer($optionId, $optionValues);
         } else {
             throw new ServiceException(ErrorCodes::DATA_MISSING, "Error updating form " . $form->getFormCode() . ". Item '$itemCode' not found");
         }
@@ -921,5 +954,27 @@ class ServiceFunctions {
             $initialValues[] = $param;
         }
         return $initialValues;
+    }
+
+    /**
+     * Formats the value of a question to be included in the export of a form.
+     * Depending on the type of the question, the value will be extracted in a different way.
+     *
+     * @param APIQuestion $question
+     * @return string
+     */
+    static private function formatItemForExport($question) {
+        if (APIQuestionTypes::isScalar($question->getType())) {
+            $value = $question->getValue();
+        } elseif (APIQuestionTypes::isSingleOption($question->getType())) {
+            // In questions of type "RADIO", return the value assigned to the option instead of the Option ID
+            $value = $question->getOptionValue();
+        } elseif (APIQuestionTypes::isMultiOptions($question->getType())) {
+            // In questions of type "CHECKBOX", return the list of Option ID as a comma separated string
+            $value = implode(',', $question->getOptionId());
+        } else {
+            $value = $question->getValue();
+        }
+        return $value;
     }
 }

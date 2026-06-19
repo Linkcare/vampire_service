@@ -70,17 +70,48 @@ class APIQuestion {
         $question->constraint = NullableString($xmlNode->constraint);
         $question->dataCode = NullableString($xmlNode->data_code);
         $question->type = NullableString($xmlNode->type);
-        if (in_array($question->type, self::OPTIONS_TYPES)) {
-            $question->optionId = NullableString($xmlNode->value);
-        } else {
-            $question->value = NullableString($xmlNode->value);
-        }
-        $question->valueDescription = NullableString($xmlNode->value_description);
         if ($xmlNode->options) {
             $question->options = [];
-            foreach ($xmlNode->options->option as $opt) {
-                $question->options[] = APIQuestionOption::parseXML($opt);
+            foreach ($xmlNode->options->option as $optionNode) {
+                $option = APIQuestionOption::parseXML($optionNode);
+                $question->options[$option->getId()] = $option;
             }
+        }
+
+        if (in_array($question->type, self::OPTIONS_TYPES)) {
+            /*
+             * The API returns the value of the question in the "value" node, but in options questions this value is actually the list of IDs of the
+             * selected options represented as an underscore separated string.
+             * We can retrieve the value associated to each option ID from the options list of the question
+             */
+
+            $optionIdList = explode('|', NullableString($xmlNode->value) ?? '');
+            if (!empty($question->options)) {
+                $values = [];
+                $descriptions = [];
+                foreach ($optionIdList as $optionId) {
+                    if (array_key_exists($optionId, $question->options)) {
+                        $values[] = $question->options[$optionId]->getValue();
+                        $descriptions[] = $question->options[$optionId]->getDescription();
+                    } else {
+                        $values[] = $optionId;
+                        $descriptions[] = null;
+                    }
+                }
+            }
+            if (!APIQuestionTypes::isMultiOptions($question->type)) {
+                // Finally, if this question admits only one option, we can return the value and description as scalar values instead of arrays
+                $optionIdList = $optionIdList[0];
+                $values = $values[0];
+                $descriptions = $descriptions[0];
+            }
+
+            $question->optionId = $optionIdList;
+            $question->value = $values;
+            $question->valueDescription = $descriptions;
+        } else {
+            $question->value = NullableString($xmlNode->value);
+            $question->valueDescription = NullableString($xmlNode->value_description);
         }
 
         $question->modified = false;
@@ -263,8 +294,9 @@ class APIQuestion {
 
     /**
      * Returns the value assigned to the question.
-     * If the question is a multianswer question (e.g. RADIO), the value returned is the ID of the selected option.<br>
-     * In multianswer questions it is possible also to use the alternative functions to request specifically whether you want to get the value or the
+     * If the question is a multioptions question (e.g. RADIO, CHECK), the value returned is an underscore separated string with the ID of the
+     * selected options.<br>
+     * In multioption questions it is possible also to use the alternative functions to request specifically whether you want to get the value or the
      * optionId:
      * <ul>
      * <li>getValue()</li>
@@ -275,14 +307,21 @@ class APIQuestion {
      */
     public function getValue() {
         if (in_array($this->getType(), self::OPTIONS_TYPES)) {
+            if (is_array($this->optionId)) {
+                return implode('|', $this->optionId);
+            }
             return $this->optionId;
+        }
+
+        if (is_array($this->value)) {
+            return implode('|', $this->value);
         }
         return $this->value;
     }
 
     /**
      *
-     * @return string
+     * @return string|string[]
      */
     public function getOptionId() {
         return $this->optionId;
@@ -290,7 +329,7 @@ class APIQuestion {
 
     /**
      *
-     * @return string
+     * @return string|string[]
      */
     public function getOptionValue() {
         return $this->value;
@@ -298,7 +337,7 @@ class APIQuestion {
 
     /**
      *
-     * @return string
+     * @return string|string[]
      */
     public function getValueDescription() {
         return $this->valueDescription;
@@ -370,24 +409,30 @@ class APIQuestion {
      *
      * Note that when $optionId (The ID of the option), is not null, $optionValue will be ignored by the API,
      *
-     * @param string $optionId
-     * @param string $optionValue
+     * @param string $optionId|string[]
+     * @param string|string[] $optionValue
      */
     public function setOptionAnswer($optionId, $optionValue = null) {
-        if ($optionId !== null && !is_scalar($optionId)) {
-            throw new Exception('The answer of a question must be a scalar value');
+        if ($optionId !== null && !APIQuestionTypes::isMultiOptions($this->getType()) && !is_scalar($optionId)) {
+            throw new Exception('The answer of the question must be a scalar value');
         }
 
         if (in_array($this->getType(), self::OPTIONS_TYPES)) {
-            $this->modified = ($this->optionId !== $optionId);
+            $newValue = is_array($optionId) ? implode('|', $optionId) : $optionId;
+            $prevValue = is_array($this->optionId) ? implode('|', $this->optionId) : $this->optionId;
+            $this->modified = ($prevValue !== $newValue);
             $this->optionId = $optionId;
         }
 
-        if ($optionValue !== null && !is_scalar($optionValue)) {
-            throw new APIException('The answer of a question must be a scalar value');
+        if (!is_array($optionId) && isNullOrEmpty($optionId)) {
+            if ($optionValue !== null && !APIQuestionTypes::isMultiOptions($this->getType()) && !is_scalar($optionValue)) {
+                throw new APIException('The answer of the question must be a scalar value');
+            }
+            $newValue = is_array($optionValue) ? implode('|', $optionValue) : $optionValue;
+            $prevValue = is_array($this->value) ? implode('|', $this->value) : $this->value;
+            $this->modified = $this->modified || ($prevValue !== $newValue);
         }
 
-        $this->modified = $this->modified || ($this->value !== $optionValue);
         $this->value = $optionValue;
     }
 
@@ -428,7 +473,9 @@ class APIQuestion {
         if (!$this->modified) {
             return;
         }
-        $this->api->form_set_answer($this->formId, $this->id, $this->value, $this->optionId);
+        $value = is_array($this->value) ? implode('|', $this->value) : $this->value;
+        $optionId = is_array($this->optionId) ? implode('|', $this->optionId) : $this->optionId;
+        $this->api->form_set_answer($this->formId, $this->id, $value, $optionId);
         $this->modified = false;
     }
 
@@ -469,8 +516,16 @@ class APIQuestion {
         }
 
         if (in_array($this->getType(), self::OPTIONS_TYPES)) {
-            $xml->createChildNode($parentNode, "value", $this->getOptionValue());
-            $xml->createChildNode($parentNode, "option_id", $this->getOptionId());
+            $optionValues = $this->getOptionValue();
+            if (is_array($optionValues)) {
+                $optionValues = implode('|', $optionValues);
+            }
+            $optionIds = $this->getOptionId();
+            if (is_array($optionIds)) {
+                $optionIds = implode('|', $optionIds);
+            }
+            $xml->createChildNode($parentNode, "value", $optionValues);
+            $xml->createChildNode($parentNode, "option_id", $optionIds);
         } elseif ($this->getType() == APIQuestionTypes::CODE) {
             $valObj = new stdClass();
             $valObj->code = $this->getValue();

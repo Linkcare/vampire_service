@@ -35,7 +35,8 @@ header('Content-type: application/json');
 $function = $_GET['function'];
 $logger = ServiceLogger::init($GLOBALS['LOG_LEVEL'], $GLOBALS['LOG_DIR']);
 
-$publicFunctions = ['track_pending_shipments', 'track_pending_receptions', 'import_blood_processing_data'];
+$publicFunctions = ['track_pending_shipments', 'track_pending_receptions', 'import_blood_processing_data', 'export_prospective_data',
+        'export_retrospective_data'];
 
 if (in_array($function, $publicFunctions)) {
     $json = file_get_contents('php://input');
@@ -370,6 +371,175 @@ function import_blood_processing_data($parameters) {
     return $serviceResponse;
 }
 
+/**
+ *
+ * @param stdClass $parameters
+ * @return BackgroundServiceResponse
+ */
+function export_prospective_data($parameters) {
+    $serviceResponse = new BackgroundServiceResponse(BackgroundServiceResponse::IDLE, "");
+    $executionResult = BackgroundServiceResponse::SUCCESS;
+
+    $numSuccessful = 0;
+    $numErrors = 0;
+    $numSkipped = 0;
+
+    $api = LinkcareSoapAPI::getInstance();
+
+    /* Retrieve the list of valid Admissions (do not include REJECTED or DISCHARGED for any reason different than END OF PROGRAM */
+    $batchSize = 100;
+    $ix = 0;
+
+    $exporter = new DataExport($GLOBALS['PROSPECTIVE_EXPORT_DIR']);
+
+    do {
+        try {
+            $admissions = $api->admission_list_program($GLOBALS['PROJECT_CODE'], 'ACTIVE,ENROLLED,DISCHARGED', null, null, $batchSize, $ix,
+                    'ID_PATIENT');
+        } catch (Exception $e) {
+            $serviceResponse->setCode(BackgroundServiceResponse::ERROR);
+            $serviceResponse->setMessage("Error retrieving admissions from API: " . $e->getMessage());
+            return $serviceResponse;
+        }
+        $ix += count($admissions);
+        foreach ($admissions as $admission) {
+            $admission->refresh(); // Refresh the admission to ensure that all the information is available
+            $patient = $admission->getCase();
+            $patientId = $patient->getId();
+            $patientRef = $patient->getNickname();
+            $cohort = $admission->getTrial();
+
+            switch (strtoupper($cohort)) {
+                case 'CONTROL' :
+                    $cohort = 'NON_PD';
+                    break;
+                case 'INTERVENTION' :
+                    $cohort = 'PD';
+                    break;
+                default :
+                    $msg = "Patient $patientRef (ID: $patientId): Unknown cohort: $cohort. Prospective data export skipped.";
+                    $serviceResponse->addDetails($msg);
+                    ServiceLogger::getInstance()->error($msg);
+                    $numSkipped++;
+                    continue 2; // Skip to the next admission
+            }
+
+            $patientData = [];
+            $patientData['PATIENT_REF'] = $patientRef;
+            $patientData['BIRTHDATE'] = $patient->getBirthdate();
+            $patientData['GENDER'] = $patient->getGender();
+            $patientData['ENROL_DATE'] = $admission->getEnrolDate();
+            $patientData['COHORT'] = $cohort;
+            $site = strtoupper($admission->getSubscription()->getTeam()->getName());
+            $patientData['SITE'] = $site;
+
+            if ($site == 'LINKCARE') {
+                $msg = "Patient " . $patientRef . " (ID: " . $patientId .
+                        ") is a test subject (created by Linkcare Team). Prospective data export skipped.";
+                $serviceResponse->addDetails($msg);
+                ServiceLogger::getInstance()->info($msg);
+                $numSkipped++;
+                continue;
+            }
+
+            if ($admission->getStatus() == APIAdmission::STATUS_DISCHARGED && $admission->getDischargeType() != APIDischargeTypes::END) {
+                $msg = "Patient " . $patientRef . " (ID: " . $patientId . ") is discharged with reason '" . $admission->getDischargeDescription() .
+                        "'. Prospective data export skipped.";
+                $serviceResponse->addDetails($msg);
+                ServiceLogger::getInstance()->info($msg);
+                $numSkipped++;
+                continue;
+            }
+
+            $exporter->writeDataToCSV('PATIENTS', $patientData);
+
+            try {
+                $prospectiveForms = exportableProspectiveFormList($exporter, $cohort);
+                $exporter->exportFormsData($patientRef, $admission, $prospectiveForms);
+                $numSuccessful++;
+            } catch (Exception $e) {
+                $msg = "ERROR Patient $patientRef (ID: $patientId): Failed to export prospective data. " . $e->getMessage();
+                $numErrors++;
+                $serviceResponse->addDetails($msg);
+                ServiceLogger::getInstance()->error($msg);
+                $executionResult = BackgroundServiceResponse::ERROR;
+            }
+        }
+    } while (count($admissions) == $batchSize);
+
+    $msg = "Export prospective data finished. Errors: $numErrors, Successful: $numSuccessful, Skipped: $numSkipped, Total patients processed: " . $ix;
+    $serviceResponse->setMessage($msg);
+    $serviceResponse->setCode($executionResult);
+
+    return $serviceResponse;
+}
+
+/**
+ *
+ * @param stdClass $parameters
+ * @return BackgroundServiceResponse
+ */
+function export_retrospective_data($parameters) {
+    $serviceResponse = new BackgroundServiceResponse(BackgroundServiceResponse::IDLE, "");
+    $executionResult = BackgroundServiceResponse::SUCCESS;
+
+    $numSuccessful = 0;
+    $numErrors = 0;
+    $numSkipped = 0;
+
+    $api = LinkcareSoapAPI::getInstance();
+
+    /* Retrieve the list of valid Admissions (do not include REJECTED or DISCHARGED for any reason different than END OF PROGRAM */
+    $batchSize = 100;
+    $ix = 0;
+
+    $exporter = new DataExport($GLOBALS['RETROSPECTIVE_EXPORT_DIR'], true);
+
+    do {
+        try {
+            $admissions = $api->admission_list_program('PROCARE4LIFE', 'ACTIVE,ENROLLED,DISCHARGED', null, null, $batchSize, $ix, 'ID_PATIENT');
+        } catch (Exception $e) {
+            $serviceResponse->setCode(BackgroundServiceResponse::ERROR);
+            $serviceResponse->setMessage("Error retrieving admissions from API: " . $e->getMessage());
+            return $serviceResponse;
+        }
+        $ix += count($admissions);
+        foreach ($admissions as $admission) {
+            $admission->refresh(); // Refresh the admission to ensure that all the information is available
+            $patient = $admission->getCase();
+            $patientId = $patient->getId();
+            $patientRef = $patient->getNickname();
+
+            if ($admission->getStatus() == APIAdmission::STATUS_DISCHARGED && $admission->getDischargeType() != APIDischargeTypes::END) {
+                $msg = "Patient " . $patientRef . " (ID: " . $patientId . ") is discharged with reason '" . $admission->getDischargeDescription() .
+                        "'. Prospective data export skipped.";
+                $serviceResponse->addDetails($msg);
+                ServiceLogger::getInstance()->info($msg);
+                $numSkipped++;
+                continue;
+            }
+
+            try {
+                $prospectiveForms = exportableRetrospectiveFormList($exporter);
+                $exporter->exportFormsData($patientRef, $admission, $prospectiveForms);
+                $numSuccessful++;
+            } catch (Exception $e) {
+                $msg = "ERROR Patient $patientRef (ID: $patientId): Failed to export prospective data. " . $e->getMessage();
+                $numErrors++;
+                $serviceResponse->addDetails($msg);
+                ServiceLogger::getInstance()->error($msg);
+                $executionResult = BackgroundServiceResponse::ERROR;
+            }
+        }
+    } while (count($admissions) == $batchSize);
+
+    $msg = "Export prospective data finished. Errors: $numErrors, Successful: $numSuccessful, Skipped: $numSkipped, Total patients processed: " . $ix;
+    $serviceResponse->setMessage($msg);
+    $serviceResponse->setCode($executionResult);
+
+    return $serviceResponse;
+}
+
 /* ******* Internal funcions ************************************************** */
 /**
  * Loads the data provided by CQS about the blood processig of the patients from an Excel file.
@@ -552,3 +722,74 @@ function loadIPINBloodProcessingData($processFile, $teamCode) {
 
     return $patientSamples;
 }
+
+/**
+ * Returns the list of forms and items to be exported for the prospective data export, depending on the cohort of the patient.
+ *
+ * @param DataExport $exporter
+ * @param string $cohort ('PD' or 'NON_PD')
+ * @return string[][]
+ */
+function exportableProspectiveFormList($exporter, $cohort) {
+    $clinicalForms = [];
+    $clinicalForms[] = ['formCode' => 'CLINICAL_HISTORY_FORM', 'items' => $exporter->exportableFields('CLINICAL_HISTORY_FORM')];
+    $prospectiveForms['CLINICAL_HISTORY'] = $clinicalForms;
+
+    // Common (Non-PD and PD) clinical assessment forms
+    $assesmentForms = [];
+    $assesmentForms[] = ['formCode' => 'BERG_BALANCE_SCALE', 'items' => $exporter->exportableFields('BERG_BALANCE_SCALE')];
+    $assesmentForms[] = ['formCode' => 'CIRS-G', 'items' => $exporter->exportableFields('CIRS-G')];
+    $assesmentForms[] = ['formCode' => 'MMSE_PARKINSON_FORM', 'items' => $exporter->exportableFields('MMSE_PARKINSON_FORM')];
+    $assesmentForms[] = ['formCode' => 'GDS_SHORT_FORM', 'items' => $exporter->exportableFields('GDS_SHORT_FORM')];
+
+    if ($cohort != 'PD') {
+        $prospectiveForms['NON_PD_CLINICAL_ASSESSMENT'] = $assesmentForms;
+    }
+
+    if ($cohort == 'PD') {
+        // PD specific clinical assessment forms
+        $assesmentForms[] = ['formCode' => 'PD-CRS', 'items' => $exporter->exportableFields('PD-CRS')];
+        $assesmentForms[] = ['formCode' => 'PDQ-8', 'items' => $exporter->exportableFields('PDQ-8')];
+        $assesmentForms[] = ['formCode' => 'PD-CFRS', 'items' => $exporter->exportableFields('PD-CFRS')];
+        $assesmentForms[] = ['formCode' => 'MDS-UPDRS-1', 'items' => $exporter->exportableFields('MDS-UPDRS-1')];
+        $assesmentForms[] = ['formCode' => 'MDS-UPDRS-2', 'items' => $exporter->exportableFields('MDS-UPDRS-2')];
+        $assesmentForms[] = ['formCode' => 'MDS-UPDRS-3', 'items' => $exporter->exportableFields('MDS-UPDRS-3')];
+        $assesmentForms[] = ['formCode' => 'MDS-UPDRS-4', 'items' => $exporter->exportableFields('MDS-UPDRS-4')];
+
+        $prospectiveForms['PD_CLINICAL_ASSESSMENT'] = $assesmentForms;
+    }
+
+    return $prospectiveForms;
+}
+
+/**
+ * Returns the list of forms and items to be exported for the prospective data export, depending on the cohort of the patient.
+ *
+ * @param DataExport $exporter
+ * @return string[][]
+ */
+function exportableRetrospectiveFormList($exporter) {
+    $demographicForm = [];
+    $demographicForm[] = ['formCode' => 'DEMOGRAPHIC_DATA_FORM', 'items' => $exporter->exportableFields('DEMOGRAPHIC_DATA_FORM')];
+    $retrospectiveForms['DEMOGRAPHIC'] = $demographicForm;
+
+    $assesmentForms = [];
+
+    $assesmentForms[] = ['formCode' => 'CIRS-G', 'items' => $exporter->exportableFields('CIRS-G')];
+    $assesmentForms[] = ['formCode' => 'FES_ASSESSMENT_FORM', 'items' => $exporter->exportableFields('FES_ASSESSMENT_FORM')];
+    $assesmentForms[] = ['formCode' => 'BARTHEL', 'items' => $exporter->exportableFields('BARTHEL')];
+    $assesmentForms[] = ['formCode' => 'BERG_BALANCE_SCALE', 'items' => $exporter->exportableFields('BERG_BALANCE_SCALE')];
+    $assesmentForms[] = ['formCode' => 'MDS-UPDRS-1', 'items' => $exporter->exportableFields('MDS-UPDRS-1')];
+    $assesmentForms[] = ['formCode' => 'MDS-UPDRS-2', 'items' => $exporter->exportableFields('MDS-UPDRS-2')];
+    $assesmentForms[] = ['formCode' => 'MDS-UPDRS-3', 'items' => $exporter->exportableFields('MDS-UPDRS-3')];
+    $assesmentForms[] = ['formCode' => 'MDS-UPDRS-4', 'items' => $exporter->exportableFields('MDS-UPDRS-4')];
+    $assesmentForms[] = ['formCode' => 'EQ_5D_5DL', 'items' => $exporter->exportableFields('EQ_5D_5DL')];
+    $assesmentForms[] = ['formCode' => 'PCI_PSQIS_FORM', 'items' => $exporter->exportableFields('PCI_PSQIS_FORM')];
+    $assesmentForms[] = ['formCode' => 'STAI_FORM', 'items' => $exporter->exportableFields('STAI_FORM')];
+
+    $retrospectiveForms['PROCARE4LIFE_ASSESSMENT'] = $assesmentForms;
+
+    return $retrospectiveForms;
+}
+
+

@@ -22,6 +22,9 @@ $GLOBALS['LAB_TEAMS'] = ['SYNLAB' => ['is_lab' => 1, 'is_clinical_site' => 0], '
 $GLOBALS['CQS_IMPORT_DIR'] = '/var/www/html/services/vampire_service/cqs_import';
 $GLOBALS['IPIN_IMPORT_DIR'] = '/var/www/html/services/vampire_service/ipin_import';
 
+$GLOBALS['PROSPECTIVE_EXPORT_DIR'] = '/var/www/html/services/vampire_service/prospective_export';
+$GLOBALS['RETROSPECTIVE_EXPORT_DIR'] = '/var/www/html/services/vampire_service/retrospective_export';
+
 /**
  * ** OPTIONAL CONFIGURATION PARAMETERS ***
  */
@@ -67,6 +70,7 @@ require_once 'constants/TrackingItems.php';
 require_once 'constants/AliquotTrackingItems.php';
 require_once 'SystemFunctions.php';
 require_once 'ServiceFunctions.php';
+require_once 'DataExport.php';
 
 $GLOBALS['PROJECT_CODE'] = 'VAMPIRE';
 $GLOBALS['SHIPMENT_TASK_CODE'] = 'SHIPMENT_TRACKING';

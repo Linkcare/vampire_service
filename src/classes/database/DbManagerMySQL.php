@@ -134,7 +134,9 @@ class DbManagerMySQL extends DbManager {
      * @see DbManager::LOBInsert()
      */
     public function LOBInsert($query, $arrVariables, $arrBlobNames) {
-        $arrVariables = array_merge($arrVariables);
+        if (!is_array($arrVariables) && $arrVariables !== null) {
+            $arrVariables = [':id' => $arrVariables];
+        }
         return $this->ExecuteSQL($query, $arrVariables);
     }
 
@@ -710,7 +712,7 @@ class DbManagerMySQL extends DbManager {
         // ALTER TABLE `table_name` ADD PRIMARY KEY (`col1`, `col2`);
         $pkDef = array_map(function ($colName) {
             return '`' . $colName . '`';
-        }, $pkColumns);
+        }, $pkColumns ?? []);
         $sql = "ALTER TABLE `" . $tableName . "` ADD PRIMARY KEY (" . implode(',', $pkDef) . ")";
         $this->ExecuteBindQuery($sql);
         return $this->getError();
@@ -732,7 +734,7 @@ class DbManagerMySQL extends DbManager {
                         $colName = $matches[1];
                     }
                     return '`' . $colName . '`' . $ixLength;
-                }, $indexDef->columns);
+                }, $indexDef->columns ?? []);
         $unique = $indexDef->unique ? ' UNIQUE ' : '';
         $sql = "CREATE $unique INDEX `$indexDef->name` ON `$tableName` (" . implode(',', $ixCols) . ")";
         $this->ExecuteBindQuery($sql);
@@ -748,10 +750,10 @@ class DbManagerMySQL extends DbManager {
         // ALTER TABLE `table` ADD CONSTRAINT `fk_name` FOREIGN KEY (`col1`, `col2`) REFERENCES `referenced_table` (`col1`, `col2`) ON DELETE CASCADE;
         $cols = array_map(function ($colName) {
             return '`' . $colName . '`';
-        }, $fkDef->columnNames);
+        }, $fkDef->columnNames ?? []);
         $refCols = array_map(function ($colName) {
             return '`' . $colName . '`';
-        }, $fkDef->referencedColumnNames);
+        }, $fkDef->referencedColumnNames ?? []);
         $sql = "ALTER TABLE `$fkDef->table` ADD CONSTRAINT `$fkDef->name` FOREIGN KEY (" . implode(',', $cols) .
                 ") REFERENCES `$fkDef->referencedTable` (" . implode(',', $refCols) . ")";
         if ($fkDef->onDeleteCascade) {
@@ -932,31 +934,6 @@ class DbManagerMySQL extends DbManager {
                 return 'LONGBLOB';
         }
         return 'VARCHAR(256)';
-    }
-
-    /**
-     * Modifies the INSERT SQL $insertQuery adding a 'RETURNING' clause for the bind variables defined in $arrBoundVariables
-     * This is necessary for inserting LOB values in a query with bound variables
-     *
-     * @param string $query
-     * @param string[] $arrBoundVariables
-     * @return string
-     */
-    private function buildLobInsert($insertQuery, $arrBoundVariables) {
-        foreach ($arrBoundVariables as $varName => $fieldName) {
-            if (startsWith(":blob_", $varName)) {
-                $insertQuery = str_replace($varName, "EMPTY_BLOB()", $insertQuery);
-            } else {
-                $insertQuery = str_replace($varName, "EMPTY_CLOB()", $insertQuery);
-            }
-        }
-
-        $fieldNames = implode(",", array_values($arrBoundVariables));
-        $varNames = implode(",", array_keys($arrBoundVariables));
-
-        // The RETURNING clause should look like: RETURNING field_lob_a,field_lob_b INTO :LOB_A,:LOB_B"
-        $insertQuery = $insertQuery . " RETURNING $fieldNames INTO $varNames";
-        return $insertQuery;
     }
 
     /**

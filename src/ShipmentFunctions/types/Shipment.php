@@ -165,7 +165,7 @@ class Shipment {
      * @return boolean
      */
     public function modified($propertyName) {
-        return array_key_exists($propertyName, $this->modifiedProperties);
+        return array_key_exists($propertyName, $this->modifiedProperties ?? []);
     }
 
     /**

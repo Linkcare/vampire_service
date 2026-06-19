@@ -512,8 +512,8 @@ class LinkcareSoapAPI {
         $resp = $this->invoke('admission_list_program', $params);
         if (!$resp->getErrorCode()) {
             if ($found = simplexml_load_string($resp->getResult())) {
-                foreach ($found->admission as $taskNode) {
-                    $admissionList[] = APIAdmission::parseXML($taskNode);
+                foreach ($found->admissions->admission as $admissionNode) {
+                    $admissionList[] = APIAdmission::parseXML($admissionNode);
                 }
             }
         }
@@ -550,16 +550,16 @@ class LinkcareSoapAPI {
     /**
      *
      * @param string $admissionId
+     * @param APIAdmission $admission (optional) if provided, the data will be stored in this APIAdmission object instead of creating a new one
      * @throws APIException
      * @return APIAdmission
      */
-    function admission_get($admissionId) {
-        $admission = null;
+    function admission_get($admissionId, $admission = null) {
         $params = ["admission" => $admissionId];
         $resp = $this->invoke('admission_get', $params);
         if (!$resp->getErrorCode()) {
             if ($result = simplexml_load_string($resp->getResult())) {
-                $admission = APIAdmission::parseXML($result);
+                $admission = APIAdmission::parseXML($result, $admission);
             }
         }
 

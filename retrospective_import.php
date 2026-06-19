@@ -190,6 +190,7 @@ function importQuestionnaires($processFile, $subscriptionId, $patientsList, $sta
     $excel->dateFormatter('Y-m-d');
 
     $updatedForms = []; // List of Forms updated for each patient, it will be used later to remove the FORMS that have not been updated
+    $patientsList = $patientsList ?? [];
     foreach ($patientsList as $patientRef => $patientData) {
         $updatedForms[$patientRef] = [];
     }

@@ -20,6 +20,8 @@ class APIAdmission {
     private $suspendedDate;
     private $rejectedDate;
     private $status;
+    private $dischargeType;
+    private $dischargeDescription;
     private $dateToDisplay;
     private $ageToDisplay;
     /** @var string[] */
@@ -72,8 +74,13 @@ class APIAdmission {
             if (!$admission->status) {
                 $admission->status = NullableString($xmlNode->data->status);
             }
+            if (isset($xmlNode->data->discharge_details) && isset($xmlNode->data->discharge_details->type)) {
+                $admission->dischargeType = NullableString($xmlNode->data->discharge_details->type);
+                $admission->dischargeDescription = NullableString($xmlNode->data->discharge_details->description);
+            }
             $admission->dateToDisplay = NullableString($xmlNode->data->date_to_display);
             $admission->ageToDisplay = NullableInt($xmlNode->data->age_to_display);
+            $admission->trial = NullableString($xmlNode->data->trial);
             if (isset($xmlNode->data->subscription)) {
                 $admission->subscription = APISubscription::parseXML($xmlNode->data->subscription);
             }
@@ -198,6 +205,24 @@ class APIAdmission {
     }
 
     /**
+     * Returns the discharge type.
+     * Possible values are defined in the APIDischargeTypes class. This information is only available if the admission is discharged
+     *
+     * @return string
+     */
+    public function getDischargeType() {
+        return $this->dischargeType;
+    }
+
+    /**
+     *
+     * @return string
+     */
+    public function getDischargeDescription() {
+        return $this->dischargeDescription;
+    }
+
+    /**
      *
      * @return string
      */
@@ -211,6 +236,15 @@ class APIAdmission {
      */
     public function getAgeToDisplay() {
         return $this->ageToDisplay;
+    }
+
+    /**
+     * Branch assigned to the patient in a Trial program (Intervention/Control/Null)
+     *
+     * @return string
+     */
+    public function getTrial() {
+        return $this->trial;
     }
 
     /**
@@ -329,6 +363,10 @@ class APIAdmission {
      * METHODS
      * **********************************
      */
+    public function refresh() {
+        $this->api->admission_get($this->id, $this);
+    }
+
     /**
      *
      * @param string $taskCode

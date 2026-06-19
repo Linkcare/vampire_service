@@ -47,7 +47,7 @@ class DbManagerResultsMySQL extends DbManagerResults {
     public function GetField($fieldName) {
         // Normalize the field name to uppercase so that the search is case-insensitive
         $fieldName = strtoupper($fieldName);
-        if (!array_key_exists($fieldName, $this->fieldNames)) {
+        if (!is_array($this->fieldNames) || !array_key_exists($fieldName, $this->fieldNames)) {
             return null;
         }
         $key = $this->fieldNames[$fieldName];
