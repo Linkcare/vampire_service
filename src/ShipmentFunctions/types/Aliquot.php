@@ -251,4 +251,14 @@ class Aliquot {
 
         Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
     }
+
+    /**
+     * Deletes the aliquot from the database
+     */
+    public function delete() {
+        $arrVariables = [':id_aliquot' => $this->id];
+
+        $sql = "DELETE FROM ALIQUOTS WHERE ID_ALIQUOT = :id_aliquot";
+        Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
+    }
 }

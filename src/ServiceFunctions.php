@@ -43,6 +43,7 @@ class ServiceFunctions {
         $dbRows = [];
         $localDuplicateIds = [];
         $globalDuplicateIds = [];
+        $ignoredAliquots = [];
 
         foreach ($sampleTypesList as $sampleType) {
             $statusFormCode = $sampleType . '_STATUS_FORM';
@@ -77,9 +78,6 @@ class ServiceFunctions {
 
             // Add the new aliquots to the status form
             $ix = count($existingAliquotsArray) + 1;
-            if ($overwriteExisting) {
-                error_log("Overwriting samples status in FORM " . $destStatusForm->getId() . " for sample type $sampleType. Starting at row $ix");
-            }
 
             foreach ($aliquotsArray as $row) {
                 $dbColumns = [];
@@ -92,17 +90,41 @@ class ServiceFunctions {
                      */
                     $localDuplicateIds[] = $aliquotId;
                     continue;
-                } elseif ($aliquot = Aliquot::getInstance($aliquotId)) {
+                }
+                $aliquotIds[] = $aliquotId;
+                if ($aliquot = Aliquot::getInstance($aliquotId)) {
+                    /*
+                     * Verify whether the aliquot was already registered in another TASK of the eCRF.
+                     * This should not happen, as the aliquot IDs must be unique across all the TASKS of the eCRF
+                     */
                     if ($aliquot->taskId != $processingForm->getParentId()) {
-                        /*
-                         * ERROR: The aliquot already exists in another TASK. This should not happen, as the aliquot IDs must be unique across all the
-                         * TASKS of the eCRF
-                         */
+                        /* ERROR: The aliquot already exists in another TASK. */
                         $globalDuplicateIds[] = ['id' => $aliquotId, 'taskId' => $aliquot->taskId, 'patient' => $aliquot->patientRef];
                         continue;
                     }
                 }
-                $aliquotIds[] = $aliquotId;
+                $questionsArray[] = self::updateArrayTextQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix, AliquotStatusItems::ID,
+                        $aliquotId);
+                $questionsArray[] = self::updateArrayTextQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix,
+                        AliquotStatusItems::CREATION_DATE, DateHelper::datePart($procDateUTC));
+                $questionsArray[] = self::updateArrayTextQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix,
+                        AliquotStatusItems::CREATION_TIME, DateHelper::timePart($procDateUTC));
+                $questionsArray[] = self::updateArrayOptionQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix, AliquotStatusItems::LOCATION,
+                        null, $labTeamId);
+                $ix++;
+
+                if ($aliquot) {
+                    if ($aliquot->statusId != AliquotStatus::AVAILABLE || $aliquot->locationId != $labTeamId) {
+                        /*
+                         * The aliquot has been included in a shipment, has been moved to a different location or has been marked as rejected.
+                         * In this case we do nothing, because from the moment that the aliquot has been used for any purpose, it should not be
+                         * modified
+                         */
+                        $ignoredAliquots[] = $aliquotId;
+                    }
+                    continue;
+                }
+
                 $dbColumns['ID_ALIQUOT'] = $aliquotId;
                 $dbColumns['ID_PATIENT'] = $patientId;
                 $dbColumns['PATIENT_REF'] = $patientRef;
@@ -113,15 +135,6 @@ class ServiceFunctions {
                 $dbColumns['ALIQUOT_CREATED'] = $procDateUTC;
                 $dbColumns['ALIQUOT_UPDATED'] = $procDateUTC;
 
-                $questionsArray[] = self::updateArrayTextQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix, AliquotStatusItems::ID,
-                        $aliquotId);
-                $questionsArray[] = self::updateArrayTextQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix,
-                        AliquotStatusItems::CREATION_DATE, DateHelper::datePart($procDateUTC));
-                $questionsArray[] = self::updateArrayTextQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix,
-                        AliquotStatusItems::CREATION_TIME, DateHelper::timePart($procDateUTC));
-                $questionsArray[] = self::updateArrayOptionQuestionValue($destStatusForm, $destArrayHeader->getId(), $ix, AliquotStatusItems::LOCATION,
-                        null, $labTeamId);
-                $ix++;
                 $dbRows[] = $dbColumns;
             }
 
@@ -133,8 +146,34 @@ class ServiceFunctions {
             }
         }
 
+        /*
+         * Check which aliquots were already registered in the database for this TASK.
+         * The aliquots that existed but have not been informed now, will be deleted from the database,
+         * but only if there is no restriction that prevents their deletion (for example, if they have been
+         * included in a shipment or have been moved to a different location)
+         */
+        /* @var Aliquot[] $trackedAliquots */
+        $trackedAliquots = ShipmentFunctions::loadAliquotsByTask($processingForm->getParentId());
+
+        /* @var Aliquot[] $toDelete */
+        $toDelete = array_filter($trackedAliquots,
+                function ($x) use ($aliquotIds, $labTeamId) {
+                    /* @var Aliquot $x */
+                    return !in_array($x->id, $aliquotIds) && $x->statusId == AliquotStatus::AVAILABLE && $x->locationId == $labTeamId;
+                });
+
+        /* @var Aliquot[] $nonDeletable */
+        $nonDeletable = array_filter($trackedAliquots,
+                function ($x) use ($aliquotIds, $labTeamId) {
+                    /* @var Aliquot $x */
+                    /* An aliquot can't be deleted if it has been included in a shipment, used, rejected, or moved to a different location */
+                    return !in_array($x->id, $aliquotIds) && ($x->statusId != AliquotStatus::AVAILABLE || $x->locationId != $labTeamId);
+                });
+
         // Remove previous Aliquots of this TASK from the database if they exist
-        ShipmentFunctions::removeAliquotsByTask($processingForm->getParentId());
+        foreach ($toDelete as $aliquotToDelete) {
+            $aliquotToDelete->delete();
+        }
         ShipmentFunctions::trackAliquots($dbRows, AliquotAuditActions::CREATED);
 
         // Concatenate the added aliquot IDs into a string
@@ -142,24 +181,39 @@ class ServiceFunctions {
 
         $response = new ServiceResponse($aliquotsIncluded, null);
 
-        if (!empty($localDuplicateIds) || !empty($globalDuplicateIds)) {
+        if (!empty($localDuplicateIds) || !empty($globalDuplicateIds) || !empty($ignoredAliquots) || !empty($nonDeletable)) {
             /* There exists duplicated Aliquot IDs. Send a warning eMail to tech support */
-            $subject = "Patient $patientRef has duplicated Aliquot Ids";
-            $body = "Patient: <b>$patientRef</b><br/><br/>";
-            $body .= "The Blood Processing Data form (Form ID: " . $processingForm->getId() . ", Task Id. " . $processingForm->getParentId() .
-                    ") contains duplicated aliquot Ids<br/><br/>";
-            if (!empty($localDuplicateIds)) {
-                $body .= "IDs duplicated within the same form: " . implode(", ", $localDuplicateIds) . ".<br/><br/>";
+            $subject = "ALIQUOT REGISTRATION WARNINGS for subject $patientRef";
+            $body = "Subject: <b>$patientRef</b><br/>";
+            $body = "BLOOD PROCESSING task: " . $processingForm->getParentId() . "<br/>";
+            $body .= '<br/>';
+            if (!empty($localDuplicateIds) || !empty($globalDuplicateIds)) {
+                $body .= "The list of aliquots informed contains duplicated Ids<br/><br/>";
+                if (!empty($localDuplicateIds)) {
+                    $body .= "IDs duplicated within the same form: <b>" . implode(", ", $localDuplicateIds) . ".</b><br/><br/>";
+                }
+                if (!empty($globalDuplicateIds)) {
+                    $body .= "IDs duplicated in other forms:<br><b>";
+                    $body .= implode("<br/>",
+                            array_map(
+                                    function ($dup) {
+                                        return "- " . $dup['id'] . ", Task ID: " . $dup['taskId'] . ", Patient: " . $dup['patient'] . "<br/>";
+                                    }, $globalDuplicateIds));
+                    $body .= "</b><br/><br/>";
+                }
             }
-            if (!empty($globalDuplicateIds)) {
-                $body .= "IDs duplicated in other forms:<br>";
-                $body .= implode("<br/>",
-                        array_map(
-                                function ($dup) {
-                                    return "- " . $dup['id'] . ", Task ID: " . $dup['taskId'] . ", Patient: " . $dup['patient'] . "<br/>";
-                                }, $globalDuplicateIds));
-                $body .= "<br/><br/>";
+            if (!empty($ignoredAliquots)) {
+                $body .= "Some aliquots were not updated in Blood Aliquots Management database the  because they have already been used or have been moved to a different location: <b>" .
+                        implode(", ", $ignoredAliquots) . ".</b><br/><br/>";
             }
+            if (!empty($nonDeletable)) {
+                $body .= "Some aliquots previosuly registered in the Blood Aliquots Management database were removed from the eCRF's BLOOD PROCESSING task, but could not be deleted from the Blood Aliquots Management database because its state doesn't allow deletion.<br/> ";
+                $body .= "The most probable reasons are that the aliquots have been included in a shipment, have been moved to a different location or have been marked as rejected.<br/>";
+                $body .= "The aliquots that could not be deleted are: <b>" . implode(", ", array_map(function ($x) {
+                    return $x->id;
+                }, $nonDeletable)) . "</b>.<br/><br/>";
+            }
+
             $response->setEmailCommunication($subject, $body);
         }
 

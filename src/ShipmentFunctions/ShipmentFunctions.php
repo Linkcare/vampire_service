@@ -1027,6 +1027,22 @@ class ShipmentFunctions {
     }
 
     /**
+     * Loads all the aliquots associated to a specific eCRF Task.
+     *
+     * @param string $taskId
+     */
+    static function loadAliquotsByTask($taskId) {
+        $arrIds = [];
+        $sql = "SELECT ID_ALIQUOT FROM ALIQUOTS WHERE ID_TASK = :taskId";
+        $rst = Database::getInstance()->ExecuteBindQuery($sql, [':taskId' => $taskId]);
+        while ($rst->Next()) {
+            $arrIds[] = $rst->GetField('ID_ALIQUOT');
+        }
+
+        return Aliquot::batchLoad($arrIds);
+    }
+
+    /**
      * Returns the list of shipments that have shipped aliquots that have not been tracked yet in the eCRF.
      * The conditions to consider that a Shipment is pending to be tracked are:
      * <ul>

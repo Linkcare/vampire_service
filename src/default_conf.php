@@ -34,9 +34,8 @@ $GLOBALS['LOG_LEVEL'] = 'error';
 /* Directory to store logs in disk. If null, logs will only be generated on stdout */
 $GLOBALS['LOG_DIR'] = null;
 
-/**
- * ** REQUIRED CONFIGURATION PARAMETERS ***
- */
+$GLOBALS['MAIL_CONFIG'] = null;
+$GLOBALS['TECH_SUPPORT_EMAIL'] = ['techsupport@linkcarebio.com'];
 
 // This service assumes that it is executing in an environment with PHP and Composer installed. The following line is required to load the
 // dependencies defined in the composer.json file
@@ -77,4 +76,4 @@ $GLOBALS['SHIPMENT_TRACKING_FORM'] = 'SHIPMENT_TRACKING_FORM';
 
 date_default_timezone_set($GLOBALS['DEFAULT_TIMEZONE']);
 
-$GLOBALS['VERSION'] = '1.6';
+$GLOBALS['VERSION'] = '1.7';
