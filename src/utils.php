@@ -211,7 +211,11 @@ function cleanFilters($filters) {
 }
 
 function sendEmail($subject, $body) {
-    if (isNullOrEmpty($GLOBALS['MAIL_CONFIG']) || isNullOrEmpty($GLOBALS['TECH_SUPPORT_EMAIL'])) {
+    $emailAddresses = $GLOBALS['TECH_SUPPORT_EMAIL'];
+    if (is_scalar($emailAddresses)) {
+        $emailAddresses = isNullOrEmpty($emailAddresses) ? [] : [$emailAddresses];
+    }
+    if (isNullOrEmpty($GLOBALS['MAIL_CONFIG']) || count($emailAddresses) == 0) {
         error_log("sendEmail: Mail configuration or tech support email not set. Subject: $subject, Body: $body");
         return;
     }

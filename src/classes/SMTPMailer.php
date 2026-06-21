@@ -12,7 +12,13 @@ class SMTPMailer {
     public function __construct($to, $subject, $body, $plainBody = '') {
         $mail_setting = json_decode($GLOBALS['MAIL_CONFIG']);
 
-        $this->client = new \PHPMailer(true);
+        if (class_exists('\PHPMailer\PHPMailer\PHPMailer')) {
+            // PHPMailer 6.x
+            $this->client = new \PHPMailer\PHPMailer\PHPMailer(true);
+        } else {
+            // PHPMailer 5.x o anterior
+            $this->client = new PHPMailer(true);
+        }
         $this->client->isSMTP();
         $this->client->Host = $mail_setting->mail->host;
         $this->client->SMTPAuth = true;

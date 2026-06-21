@@ -37,7 +37,7 @@ $logger = ServiceLogger::init($GLOBALS['LOG_LEVEL'], $GLOBALS['LOG_DIR']);
 
 $systemFunctions = ['deploy_service'];
 $programFunctions = ['add_aliquots'];
-$shipmentManagementFunctions = [shipment_locations, 'shipment_list', 'shipment_create', 'shipment_details', 'shippable_aliquots', 'find_aliquot',
+$shipmentManagementFunctions = ['shipment_locations', 'shipment_list', 'shipment_create', 'shipment_details', 'shippable_aliquots', 'find_aliquot',
         'shipment_add_aliquot', 'shipment_remove_aliquot', 'shipment_update', 'shipment_send', 'shipment_start_reception', 'shipment_finish_reception',
         'shipment_delete', 'shipment_set_aliquot_condition', 'aliquot_list', 'aliquot_bulk_change', 'aliquots_report_by_patient',
         'shipment_add_aliquots_from_file'];
