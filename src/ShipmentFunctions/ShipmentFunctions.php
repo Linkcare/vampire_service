@@ -801,7 +801,7 @@ class ShipmentFunctions {
             throw new ShipmentException(ShipmentErrorCodes::DATA_MISSING, "Missing Excel file");
         }
 
-        $params = json_decode($_POST["metadata"] ?? null);
+        $params = json_decode($_POST["metadata"] ?? '');
         if (!$params) {
             throw new ShipmentException(ShipmentErrorCodes::INVALID_JSON, "Missing parameters");
         }
@@ -851,7 +851,7 @@ class ShipmentFunctions {
                     }
                 }
                 if (!$aliquotIdColumnKey) {
-                    throw new ShipmentException(ShipmentErrorCodes::INVALID_DATA_FORMAT, "ALIQUOT_ID column not found in file $filename");
+                    throw new ShipmentException(ShipmentErrorCodes::INVALID_DATA_FORMAT, "ID_ALIQUOT column not found in file $filename");
                 }
             }
             $aliquotIds[] = $rowData[$aliquotIdColumnKey];

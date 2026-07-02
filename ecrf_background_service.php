@@ -41,7 +41,7 @@ $publicFunctions = ['track_pending_shipments', 'track_pending_receptions', 'impo
 if (in_array($function, $publicFunctions)) {
     $json = file_get_contents('php://input');
     try {
-        $parameters = json_decode($json);
+        $parameters = json_decode($json ?? '');
         if (trim($json) != '' && $parameters == null) {
             throw new Exception("Invalid parameters");
         }
