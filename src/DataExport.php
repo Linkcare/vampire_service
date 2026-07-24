@@ -96,6 +96,21 @@ class DataExport {
      * @param string $dir
      */
     private function resetExportDir() {
+        // Verify that the export directory exists and is writable, or create it if it does not exist
+        if (file_exists($this->exportDir) && !is_dir($this->exportDir)) {
+            throw new ServiceException(ErrorCodes::CONFIG_ERROR, "Export path exists but is not a directory: " . $this->exportDir);
+        }
+
+        if (!file_exists($this->exportDir)) {
+            mkdir($this->exportDir, 0777, true);
+            // check if the directory was created successfully
+            if (!file_exists($this->exportDir)) {
+                throw new ServiceException(ErrorCodes::CONFIG_ERROR, "Failed to create export directory: " . $this->exportDir);
+            }
+        } elseif (!is_writable($this->exportDir)) {
+            throw new ServiceException(ErrorCodes::CONFIG_ERROR, "Export directory is not writable: " . $this->exportDir);
+        }
+
         $files = glob($this->exportDir . '/*.csv');
         foreach ($files as $file) {
             if (file_exists($file)) {

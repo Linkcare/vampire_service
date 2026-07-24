@@ -681,7 +681,7 @@ class ServiceFunctions {
             }
         }
         if (!$bpForm) {
-            throw new ServiceException(ErrorCodes::NOT_FOUND, "No BLOOD PROCESSING task found for patient $patientRef");
+            throw new ServiceException(ErrorCodes::NOT_FOUND, "No open BLOOD PROCESSING task found for patient $patientRef");
         }
 
         return [$patient, $bpForm];

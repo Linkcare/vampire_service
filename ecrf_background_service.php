@@ -302,6 +302,7 @@ function import_blood_processing_data($parameters) {
         foreach ($importedData as $patientSamples) {
             try {
                 $patient = $patientSamples['patient'];
+                /** @var APIForm $bpForm */
                 $bpForm = $patientSamples['form'];
                 $displayName = $patientSamples['displayName'];
                 if ($loadError = $patientSamples['error']) {
@@ -317,21 +318,22 @@ function import_blood_processing_data($parameters) {
                     $aliquotIds = array_merge($aliquotIds, $ids);
                 }
                 $alreadyExisting = Aliquot::findAliquots($aliquotIds);
-                if (count($aliquotIds) == count($alreadyExisting)) {
+                if (count($aliquotIds) == count($alreadyExisting) && $bpForm->isClosed()) {
                     // All aliquots already exist. No need to import
                     $msg = "Aliquots of sample $displayName already loaded. Data skipped.";
                     $serviceResponse->addDetails($msg);
                     ServiceLogger::getInstance()->info($msg);
                     $numSkipped++;
                     continue;
-                } elseif (count($alreadyExisting) > 0) {
+                }
+
+                ServiceFunctions::updateBloodProcessingData($bpForm, $patientSamples['samples']);
+                if (count($alreadyExisting) > 0) {
                     $msg = "Aliquots of sample $displayName modified (previous import had " . count($alreadyExisting) . " aliquots). Now: " .
                             count($aliquotIds);
                 } else {
                     $msg = "Sample $displayName: Imported successfully (" . count($aliquotIds) . " aliquots)";
                 }
-
-                ServiceFunctions::updateBloodProcessingData($bpForm, $patientSamples['samples']);
 
                 $serviceResponse->addDetails($msg);
                 ServiceLogger::getInstance()->info($msg);
@@ -791,5 +793,3 @@ function exportableRetrospectiveFormList($exporter) {
 
     return $retrospectiveForms;
 }
-
-
