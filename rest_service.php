@@ -39,10 +39,11 @@ $systemFunctions = ['deploy_service'];
 $programFunctions = ['add_aliquots'];
 $shipmentManagementFunctions = ['shipment_locations', 'shipment_list', 'shipment_create', 'shipment_details', 'shippable_aliquots', 'find_aliquot',
         'shipment_add_aliquot', 'shipment_remove_aliquot', 'shipment_update', 'shipment_send', 'shipment_start_reception', 'shipment_finish_reception',
-        'shipment_delete', 'shipment_set_aliquot_condition', 'aliquot_list', 'aliquot_bulk_change', 'aliquots_report_by_patient',
-        'shipment_add_aliquots_from_file'];
+        'shipment_delete', 'shipment_set_aliquot_condition', 'aliquot_list', 'aliquots_report_by_patient', 'shipment_add_aliquots_from_file'];
+$bulkChangeFunctions = ['bulk_change_create', 'bulk_change_list', 'bulk_change_details', 'bulk_change_delete', 'bulk_change_add_aliquot',
+        'bulk_change_remove_aliquot', 'bulk_change_update', 'bulk_change_commit', 'bulk_change_update_aliquot', 'bulk_change_add_from_file'];
 
-$publicFunctions = array_merge($systemFunctions, $programFunctions, $shipmentManagementFunctions);
+$publicFunctions = array_merge($systemFunctions, $programFunctions, $shipmentManagementFunctions, $bulkChangeFunctions);
 
 if (in_array($function, $publicFunctions)) {
     $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
@@ -64,10 +65,13 @@ if (in_array($function, $publicFunctions)) {
         $apiSession = initServiceSession($authToken, $parameters, $surrogate);
         Database::init($GLOBALS['SERVICE_DB_URI'], $logger);
         Database::getInstance()->beginTransaction(); // Execute all commands in transactional mode
+        ShipmentFunctions::setTimezone($apiSession->getTimezone());
+        ShipmentFunctions::setActiveLocation($apiSession->getTeamId());
         if (in_array($function, $shipmentManagementFunctions)) {
-            ShipmentFunctions::setTimezone($apiSession->getTimezone());
-            ShipmentFunctions::setActiveLocation($apiSession->getTeamId());
             $reponse = ShipmentFunctions::{$function}($parameters);
+            $serviceResponse = new ServiceResponse($reponse, null);
+        } else if (in_array($function, $bulkChangeFunctions)) {
+            $reponse = BulkChangeFunctions::{$function}($parameters);
             $serviceResponse = new ServiceResponse($reponse, null);
         } else {
             $serviceResponse = $function($parameters);

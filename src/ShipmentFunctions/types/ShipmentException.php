@@ -17,6 +17,10 @@ class ShipmentException extends Exception {
         parent::__construct($this->getErrorMessage(), null, null);
     }
 
+    public function getErrorCode() {
+        return $this->errorCode;
+    }
+
     public function getErrorMessage() {
         $msg = $this->errorCode;
         if ($this->additionalMessage) {

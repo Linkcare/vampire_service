@@ -9,12 +9,14 @@ require_once 'constants/AliquotConditions.php';
 require_once 'constants/BloodSampleTypes.php';
 require_once 'constants/ShipmentStatus.php';
 require_once 'constants/ReceptionStatus.php';
+require_once 'constants/BulkChangeStatus.php';
 require_once 'constants/AliquotAuditActions.php';
 require_once 'types/ShipmentException.php';
 require_once 'types/Shipment.php';
 require_once 'types/Aliquot.php';
 require_once 'types/AliquotChange.php';
 require_once 'types/BulkChange.php';
+require_once 'BulkChangeFunctions.php';
 
 class ShipmentFunctions {
     static $timezone = 'UTC';
@@ -102,6 +104,30 @@ class ShipmentFunctions {
         }
 
         return false;
+    }
+
+    /**
+     * Checks if a location exists in the database.
+     *
+     * @param string $locationId
+     * @return boolean
+     */
+    static public function getLocationName($locationId) {
+        static $locationNamesCache = [];
+
+        if (isset($locationNamesCache[$locationId])) {
+            return $locationNamesCache[$locationId];
+        }
+
+        $sql = "SELECT ID_LOCATION,NAME FROM LOCATIONS WHERE ID_LOCATION=:id";
+        $rst = Database::getInstance()->ExecuteBindQuery($sql, [':id' => $locationId]);
+        if ($rst->Next()) {
+            $locationNamesCache[$locationId] = $rst->GetField('NAME');
+            return $rst->GetField('NAME');
+        }
+
+        $locationNamesCache[$locationId] = $locationId; // Cache the ID as a fallback;
+        return $locationId; // If the location is not found, return the ID as a fallback
     }
 
     /**
@@ -603,101 +629,6 @@ class ShipmentFunctions {
     }
 
     /**
-     * Changes the properties of multiple aliquots at once.
-     *
-     * Parameters expected in $parameters:<br/>
-     * {
-     * ··"changeDate": "yyyy-mm-dd hh:nn:ss", // Expected to be in the local timezone of the active user<br/>
-     * ··"changedById": "xxxxxxx",<br/>
-     * ··"changedBy": "Full Name",<br/>
-     * ··"comments": "",<br/>
-     * ··"aliquots": [<br/>
-     * ····{<br/>
-     * ····"id" : "xxxxxxx",<br/>
-     * ····"statusId": "REJECTED",<br/>
-     * ····"conditionId": "DEFROST"<br/>
-     * ····}<br/>
-     * ··]<br/>
-     * }<br/>
-     *
-     * @param stdClass $parameters
-     * @return string Bulk change identifier
-     */
-    static public function aliquot_bulk_change($parameters) {
-        if ($changeDate = loadParam($parameters, 'changeDate')) {
-            if (!DateHelper::isValidDate($changeDate)) {
-                throw new ShipmentException(ShipmentErrorCodes::INVALID_DATA_FORMAT, "Invalid change date: " . $parameters->changeDate);
-            }
-            $changeDate = DateHelper::localToUTC($changeDate, self::$timezone);
-        } else {
-            DateHelper::currentDate();
-        }
-
-        $aliquotsArr = loadParam($parameters, 'aliquots', []);
-        if (empty($aliquotsArr)) {
-            throw new ShipmentException(ShipmentErrorCodes::DATA_MISSING, "No aliquots were provided for bulk update");
-        }
-
-        $aliquotIds = array_map(function ($aliquotJson) {
-            return $aliquotJson->id;
-        }, $aliquotsArr);
-
-        $aliquotIds = array_unique(array_filter($aliquotIds));
-        if (count($aliquotIds) != count($aliquotsArr)) {
-            throw new ShipmentException(ShipmentErrorCodes::DATA_MISSING, "Some aliquots have a null or duplicated Aliquot ID");
-        }
-
-        $changes = [];
-        foreach ($aliquotsArr as $aliquotJson) {
-            $statusId = $aliquotJson->statusId;
-            if ($statusId == AliquotStatus::REJECTED) {
-                $conditionId = $aliquotJson->conditionId;
-                if (!$conditionId) {
-                    throw new ShipmentException(ShipmentErrorCodes::DATA_MISSING, "Aliquot " . $aliquotJson->id .
-                            " was marked as REJECTED but no condition was provided");
-                }
-            } else {
-                $conditionId = null;
-            }
-            $changes[$aliquotJson->id] = ['statusId' => $statusId, 'conditionId' => $conditionId];
-        }
-
-        $aliquots = Aliquot::findAliquots($aliquotIds);
-        if (count($aliquots) != count($aliquotIds)) {
-            throw new ShipmentException(ShipmentErrorCodes::NOT_FOUND, "Some aliquots were not found in the system");
-        }
-
-        // Check if any of tha aliquots is in an state that does not allow changes
-        foreach ($aliquots as $aliquot) {
-            /** @var Aliquot $aliquot */
-            if (!in_array($aliquot->statusId, [AliquotStatus::AVAILABLE])) {
-                throw new ShipmentException(ShipmentErrorCodes::INVALID_STATUS, "Aliquot " . $aliquot->id . " is in status " . $aliquot->statusId .
-                        " that does not allow bulk changes");
-            }
-        }
-
-        $bulkChange = new BulkChange();
-        $bulkChange->changeDate = $changeDate;
-        $bulkChange->comments = loadParam($parameters, 'comments');
-        $bulkChange->changedById = loadParam($parameters, 'changedById');
-        $bulkChange->changedBy = loadParam($parameters, 'changedBy');
-
-        foreach ($changes as $aliquotId => $change) {
-            // Create an aliquot object with the new properties to be changed
-            /** @var Aliquot $aliquot */
-            $aliquotChange = new AliquotChange($aliquots[$aliquotId]);
-            $aliquotChange->newValues->statusId = $change['statusId'];
-            $aliquotChange->newValues->conditionId = $change['conditionId'];
-
-            $bulkChange->addChange($aliquotChange);
-        }
-
-        $bulkChange->save(true); // Save changes and apply to actual aliquots
-
-        return $bulkChange->id;
-    }
-
-    /**
      *
      * @param stdClass $parameters
      * @return object
@@ -822,7 +753,6 @@ class ShipmentFunctions {
         // File information
         $filename = $file["name"];
         $tmpPath = $file["tmp_name"];
-        $size = $file["size"];
         $error = $file["error"];
 
         if ($error !== UPLOAD_ERR_OK) {
@@ -1346,6 +1276,56 @@ class ShipmentFunctions {
         }
 
         return $report;
+    }
+
+    /**
+     * Loads the list of aliquot IDs from an Excel file uploaded as an attachment in the http request.
+     *
+     * @return string[] List of aliquot IDs loaded from the uploaded Excel file
+     */
+    static public function loadAliquotsFromAttachment() {
+        $file = $_FILES["file"];
+
+        // File information
+        $filename = $file["name"];
+        $tmpPath = $file["tmp_name"];
+        $error = $file["error"];
+
+        if ($error !== UPLOAD_ERR_OK) {
+            throw new ShipmentException(ShipmentErrorCodes::UNEXPECTED_ERROR, "Error uploading file (code $error)");
+        }
+
+        try {
+            $excel = Excel::open($tmpPath);
+        } catch (Exception $e) {
+            throw new ShipmentException(ShipmentErrorCodes::INVALID_DATA_FORMAT, "Error opening Excel file: $filename: " . $e->getMessage());
+        }
+
+        $sheet = $excel->sheet(0);
+        if (!$sheet) {
+            throw new ServiceException("Sheet 'Datos' not found in file: $filename");
+        }
+
+        $aliquotIdColumnKey = null;
+        $aliquotIds = [];
+        foreach ($sheet->nextRow([], Excel::KEYS_FIRST_ROW) as $rowNum => $rowData) {
+            if (!$aliquotIdColumnKey) {
+                foreach (array_keys($rowData) as $key) {
+                    if (trim(strtolower($key)) == 'id_aliquot') {
+                        $aliquotIdColumnKey = $key;
+                        break;
+                    }
+                }
+                if (!$aliquotIdColumnKey) {
+                    throw new ShipmentException(ShipmentErrorCodes::INVALID_DATA_FORMAT, "ID_ALIQUOT column not found in file $filename");
+                }
+            }
+            $aliquotIds[] = $rowData[$aliquotIdColumnKey];
+        }
+
+        $aliquotIds = array_filter($aliquotIds);
+
+        return $aliquotIds;
     }
 
     /* ************************************************************************************* */

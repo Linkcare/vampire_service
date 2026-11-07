@@ -86,6 +86,8 @@ class DbDataModels {
         $columns = [];
         $indexes = null;
         $columns[] = new DbColumnDefinition('ID_BULK_CHANGE', DbDataTypes::BIGINT, null, null, false, null, true);
+        $columns[] = new DbColumnDefinition('ID_LOCATION', DbDataTypes::VARCHAR, 32, null, false);
+        $columns[] = new DbColumnDefinition('ID_STATUS', DbDataTypes::VARCHAR, 32, null, false);
         $columns[] = new DbColumnDefinition('CHANGE_DATE', DbDataTypes::DATETIME);
         $columns[] = new DbColumnDefinition('ID_CHANGED_BY', DbDataTypes::VARCHAR, 32);
         $columns[] = new DbColumnDefinition('CHANGED_BY', DbDataTypes::VARCHAR, 128);

@@ -85,10 +85,9 @@ class AliquotChange {
      *
      * @param string $bulkChangeId
      * @param int[] $arrIds
-     * @param string $timezone
      * @return AliquotChange[] Array of AliquotChange objects indexed by their Aliquot ID
      */
-    static public function batchLoad($bulkChangeId, $arrIds, $timezone = null) {
+    static public function batchLoad($bulkChangeId, $arrIds) {
         /*
          * To avoid sending an extremely large query for all TaskTemplates, we will
          * group the TaskTemplateIds in groups of 100
@@ -117,7 +116,7 @@ class AliquotChange {
                 $rst = Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
 
                 while ($rst->Next()) {
-                    $obj = self::fromDBRecord($rst, $timezone);
+                    $obj = self::fromDBRecord($rst);
                     $arrObjects[$obj->aliquotId] = $obj;
                 }
             }
@@ -129,10 +128,9 @@ class AliquotChange {
     /**
      *
      * @param DbManagerResults $rst
-     * @param string $timezone
      * @return AliquotChange
      */
-    static public function fromDBRecord($rst, $timezone = null) {
+    static private function fromDBRecord($rst) {
         $change = new AliquotChange();
 
         $change->bulkChangeId = $rst->getField('ID_BULK_CHANGE');
@@ -155,7 +153,7 @@ class AliquotChange {
      * @param string $timezone Convert the dates to the provided timezone
      * @return stdClass
      */
-    public function toJSON($timezone = null) {
+    public function toJSON() {
         $json = new stdClass();
         $json->bulkChangeId = $this->bulkChangeId;
         $json->aliquotId = $this->aliquotId;
@@ -177,7 +175,8 @@ class AliquotChange {
     /**
      * Save the aliquot modification information in the database
      *
-     * @param string $logAction
+     * @param boolean $applyToActualAliquot If true, the change will be applied to the actual aliquot in the database
+     * @param string $changeDate The date of the change (in UTC). If null, the current date will be used
      */
     public function save($applyToActualAliquot = false, $changeDate = null) {
         $actualAliquot = $this->originalAliquot ?? Aliquot::getInstance($this->aliquotId);
@@ -190,8 +189,10 @@ class AliquotChange {
         $arrVariables[':prevConditionId'] = $this->prevValues->conditionId;
         $arrVariables[':taskId'] = $this->taskId;
 
-        $sql = "INSERT INTO CHANGED_ALIQUOTS (ID_BULK_CHANGE, ID_ALIQUOT, ID_STATUS, ID_ALIQUOT_CONDITION, ID_STATUS_PREV, ID_ALIQUOT_CONDITION_PREV, ID_STATUS_TASK)
-                VALUES (:bulkChangeId, :aliquotId, :statusId, :conditionId, :prevStatusId, :prevConditionId, :taskId)";
+        $keyColumns = ['ID_BULK_CHANGE' => ':bulkChangeId', 'ID_ALIQUOT' => ':aliquotId'];
+        $updateColumns = ['ID_STATUS' => ':statusId', 'ID_STATUS' => ':statusId', 'ID_ALIQUOT_CONDITION' => ':conditionId',
+                'ID_STATUS_PREV' => ':prevStatusId', 'ID_ALIQUOT_CONDITION_PREV' => ':prevConditionId', 'ID_STATUS_TASK' => ':taskId'];
+        $sql = Database::getInstance()->buildInsertOrUpdateQuery('CHANGED_ALIQUOTS', $keyColumns, $updateColumns);
         Database::getInstance()->ExecuteBindQuery($sql, $arrVariables);
 
         if ($applyToActualAliquot) {
@@ -221,6 +222,15 @@ class AliquotChange {
                 $derivedAliquot->save(AliquotAuditActions::CREATED);
             }
         }
+    }
+
+    /**
+     * Deletes the aliquot modification information from the database
+     */
+    public function delete() {
+        $arrVariables = [':bulkChangeId' => $this->bulkChangeId, ':aliquotId' => $this->aliquotId];
+        $sql = "DELETE FROM CHANGED_ALIQUOTS WHERE ID_BULK_CHANGE=:bulkChangeId AND ID_ALIQUOT=:aliquotId";
+        Database::getInstance()->executeBindQuery($sql, $arrVariables);
     }
 
     /**

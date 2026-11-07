@@ -30,4 +30,7 @@ abstract class ShipmentErrorCodes extends BasicEnum {
 
     /** @var string The operation requested is forbidden */
     const FORBIDDEN_OPERATION = 'FORBIDDEN_OPERATION';
+
+    /** @var string An issue with a location happened */
+    const INVALID_LOCATION = 'INVALID_LOCATION';
 }
