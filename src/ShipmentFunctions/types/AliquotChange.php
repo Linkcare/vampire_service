@@ -199,6 +199,7 @@ class AliquotChange {
             // Apply the change to the actual aliquot
             $actualAliquot->statusId = $this->newValues->statusId;
             $actualAliquot->conditionId = $this->newValues->conditionId;
+            $actualAliquot->lastUpdate = $changeDate ? $changeDate : DateHelper::currentDate();
             $actualAliquot->save(AliquotAuditActions::MODIFIED);
 
             /*
